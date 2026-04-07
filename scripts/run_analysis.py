@@ -22,7 +22,7 @@ if __name__ == "__main__":
     df = calculate_cumulative_returns(df)
 
     # Step 3: rolling metrics
-    window = 20
+    window = 3
     df["rolling_vol"] = rolling_volatility(df, window=window)
     df["rolling_sharpe"] = rolling_sharpe(df, window=window)
 
