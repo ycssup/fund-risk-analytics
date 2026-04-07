@@ -1,4 +1,4 @@
-# 📊 Fund NAV-Based Risk Analytics
+# 📊 Fund NAV-Based Risk Analytics (In Progress)
 
 A lightweight Python project for analyzing portfolio risk based on fund NAV (Net Asset Value) time series.
 
