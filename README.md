@@ -168,7 +168,7 @@ Based on sample data:
 
 ### 1. Clone the repository
 
-    git clone <your-repo-link>
+    git clone <https://github.com/ycssup/portfolio-risk-analytics-and-performance-attribution-framework-for-fund-investments.git>
     cd fund-risk-analytics
 
 ### 2. Install dependencies
