@@ -127,6 +127,16 @@ Charts are generated and saved under:
 
 ---
 
+## 📊 Data
+
+The current version of this project uses simulated/sample NAV data for demonstration purposes.
+
+This allows for a controlled environment to develop and validate the risk analytics framework.
+
+In future iterations, the model can be extended to incorporate real-world fund data for more practical applications.
+
+---
+
 ## 📈 Sample Output
 
 ### NAV & Drawdown
