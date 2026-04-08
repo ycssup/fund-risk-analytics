@@ -1,0 +1,31 @@
+category,metric,value
+Data Profile,data_frequency,weekly
+Data Profile,annualization_factor,52
+Return Metrics,inception_annualized_return,20.98%
+Return Metrics,inception_return,84.65%
+Return Metrics,year_to_date_return,-5.36%
+Return Metrics,one_year_return,14.79%
+Return Metrics,win_rate,50.30%
+Return Metrics,return_skewness,0.5154
+Return Metrics,current_consecutive_up_months,0
+Return Metrics,current_consecutive_down_months,1
+Return Metrics,max_consecutive_up_months,6
+Return Metrics,max_consecutive_down_months,3
+Risk Metrics,annualized_return,20.98%
+Risk Metrics,annualized_volatility,31.11%
+Risk Metrics,max_drawdown,-41.73%
+Risk Metrics,max_drawdown_date,2024-10-18
+Risk Metrics,max_drawdown_recovery_days,NaN
+Tail Risk Metrics,var_95_1d,2.65%
+Tail Risk Metrics,var_95_10d,8.37%
+Tail Risk Metrics,var_99_1d,2.65%
+Tail Risk Metrics,var_99_10d,8.37%
+Tail Risk Metrics,cvar_es_95_1d,2.65%
+Tail Risk Metrics,cvar_es_95_10d,8.37%
+Tail Risk Metrics,cvar_es_99_1d,2.65%
+Tail Risk Metrics,cvar_es_99_10d,8.37%
+Risk-Adjusted Return Metrics,sharpe_ratio,0.6102
+Risk-Adjusted Return Metrics,sortino_ratio,1.0310
+Risk-Adjusted Return Metrics,calmar_ratio,0.5029
+Risk-Adjusted Return Metrics,treynor_ratio,NaN
+Risk-Adjusted Return Metrics,treynor_black_ratio,NaN

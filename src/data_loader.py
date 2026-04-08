@@ -1,25 +1,35 @@
 import pandas as pd
 
+
 def load_nav_data(file_path: str) -> pd.DataFrame:
     """
-    Load NAV data from CSV file
+    Load NAV data from CSV or Excel.
 
-    Parameters:
-    - file_path: path to csv file
-
-    Returns:
-    - DataFrame with datetime index and nav column
+    Assumptions:
+    - First column = date
+    - Second column = nav
     """
 
-    df = pd.read_csv(file_path)
+    # Read file based on extension
+    if file_path.endswith(".csv"):
+        df = pd.read_csv(file_path)
+    elif file_path.endswith(".xlsx") or file_path.endswith(".xls"):
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError("Unsupported file format. Please use CSV or Excel.")
 
-    # convert date column to datetime
-    df['date'] = pd.to_datetime(df['date'])
+    # Keep only the first two columns
+    df = df.iloc[:, :2].copy()
+    df.columns = ["date", "nav"]
 
-    # sort by date
-    df = df.sort_values('date')
+    # Convert data types
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["nav"] = pd.to_numeric(df["nav"], errors="coerce")
 
-    # set index
-    df.set_index('date', inplace=True)
+    # Drop bad rows
+    df = df.dropna(subset=["date", "nav"])
+
+    # Sort by date
+    df = df.sort_values("date").reset_index(drop=True)
 
     return df
