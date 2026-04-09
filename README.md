@@ -52,9 +52,9 @@ Rolling metrics use frequency-aware windows:
 - Annualized return
 - Annualized volatility
 - Historical VaR at 95% and 99% confidence
-- 1-day VaR and 10-day VaR
+- 1-day scaled VaR and 10-day VaR
 - CVaR / Expected Shortfall at 95% and 99% confidence
-- 1-day CVaR/ES and 10-day CVaR/ES
+- 1-day scaled CVaR/ES and 10-day CVaR/ES
 
 ### 4. Risk-Adjusted Return Metrics
 
@@ -87,6 +87,10 @@ Rolling metrics use frequency-aware windows:
   - annual return chart
   - monthly return chart
   - yearly monthly-return heatmap table
+  - annual return column
+  - yearly win-rate column
+  - positive returns shown in red
+  - negative returns shown in green
 - Drawdown frequency chart
 - Metrics summary CSV report
 - PDF fund risk assessment report
@@ -327,6 +331,7 @@ The PDF report includes a combined **Return Analysis** page:
 
 - upper half: annual return chart + monthly return chart
 - lower half: yearly monthly-return heatmap table
+- table includes annual return and yearly win rate
 - positive returns shown in red
 - negative returns shown in green
 
