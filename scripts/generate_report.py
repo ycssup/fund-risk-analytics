@@ -377,6 +377,10 @@ def run_full_analysis(input_path: str) -> dict:
         drawdown_frequencies=drawdown_frequencies,
         percentage_metrics=percentage_metrics,
     )
+    save_monthly_returns_heatmap_table(
+        monthly_return_table=monthly_return_table,
+        annual_return_table=annual_return_table,
+    )
 
     return {
         "df": df,
@@ -768,6 +772,80 @@ def _save_return_charts_and_table_section(
     plt.close(fig)
 
     return page_number + 1
+
+
+def save_monthly_returns_heatmap_table(
+    monthly_return_table: pd.DataFrame,
+    annual_return_table: pd.DataFrame,
+    output_path: str = f"{CHART_DIR}/monthly_returns_heatmap_table.png",
+) -> None:
+    """
+    Save the yearly monthly-return heatmap table as a standalone chart image.
+    """
+    os.makedirs(CHART_DIR, exist_ok=True)
+    summary_table = _build_monthly_returns_summary_table(
+        monthly_return_table=monthly_return_table,
+        annual_return_table=annual_return_table,
+    )
+
+    fig, ax = plt.subplots(figsize=(16, 4.8))
+    fig.patch.set_facecolor("white")
+    ax.axis("off")
+    fig.text(0.05, 0.93, "Monthly Returns Heatmap Table", fontsize=16, weight="bold")
+
+    if summary_table.empty:
+        ax.text(0.0, 0.85, "No monthly return table is available.", fontsize=10.5)
+    else:
+        table = ax.table(
+            cellText=summary_table.values,
+            colLabels=summary_table.columns,
+            cellLoc="center",
+            colLoc="center",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(8.0)
+        table.scale(1, 1.4)
+
+        month_columns = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+        annual_return_col = summary_table.columns.get_loc("Annual Return")
+        win_rate_col = summary_table.columns.get_loc("Win Rate")
+        return_columns = month_columns | {"Annual Return"}
+        heatmap_values = []
+
+        for _, row_data in summary_table.iterrows():
+            for column_name in summary_table.columns:
+                if column_name in return_columns:
+                    parsed_value = _parse_percent_string(row_data[column_name])
+                    if not np.isnan(parsed_value):
+                        heatmap_values.append(parsed_value)
+
+        max_abs_value = max((abs(value) for value in heatmap_values), default=0.0)
+
+        for (row, col), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_text_props(weight="bold")
+                cell.set_facecolor("#E6E6E6")
+                continue
+
+            cell_value = summary_table.iloc[row - 1, col]
+            column_name = summary_table.columns[col]
+
+            if col == annual_return_col or col == win_rate_col or column_name == "Year":
+                cell.set_text_props(weight="bold")
+
+            if column_name in return_columns:
+                numeric_value = _parse_percent_string(cell_value)
+                cell.set_facecolor(_heatmap_fill_color(numeric_value, max_abs_value))
+                if not np.isnan(numeric_value):
+                    cell.get_text().set_color("#202020")
+
+            if column_name == "Year":
+                cell.set_facecolor("#F5F5F5")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
 def build_pdf_report(analysis: dict, input_path: str, output_path: str) -> None:
