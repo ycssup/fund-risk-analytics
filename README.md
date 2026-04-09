@@ -135,6 +135,7 @@ Rolling metrics use frequency-aware windows:
     │   │   ├── nav_drawdown.png
     │   │   ├── rolling_metrics.png
     │   │   ├── monthly_returns.png
+    │   │   ├── monthly_returns_heatmap_table.png
     │   │   ├── annual_returns.png
     │   │   └── drawdown_frequency.png
     │   └── reports/
@@ -324,6 +325,10 @@ Treynor metrics are `NaN` because the current input file does not include `bench
 ### Annual Returns
 
 ![Annual Returns](output/charts/annual_returns.png)
+
+### Monthly Returns Heatmap Table
+
+![Monthly Returns Heatmap Table](output/charts/monthly_returns_heatmap_table.png)
 
 ### Return Analysis Page
 
