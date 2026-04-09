@@ -1,11 +1,6 @@
 category,metric,value
-Data Profile,input_file,data/sample_nav_data.xlsx
-Data Profile,start_date,2022-11-11
-Data Profile,end_date,2026-01-30
-Data Profile,observations,166.0000
 Data Profile,data_frequency,weekly
 Data Profile,annualization_factor,52
-Data Profile,rolling_windows,"12, 26, 52"
 Return Metrics,inception_annualized_return,20.98%
 Return Metrics,inception_return,84.65%
 Return Metrics,year_to_date_return,-5.36%
