@@ -1,27 +1,28 @@
-import sys
+import argparse
 import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.data_loader import load_nav_data
-from src.return_metrics import (
-    calculate_cumulative_returns,
-    calculate_daily_returns,
-    return_summary_metrics,
-    return_tables,
+from src.analysis_pipeline import run_analysis_pipeline
+
+
+DEFAULT_INPUT_PATH = "data/sample_nav_data.xlsx"
+DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_BENCHMARK_CANDIDATES = (
+    "data/benchmark.xlsx",
+    "data/benchmark.csv",
+    "data/benchmark.xls",
 )
-from src.frequency import infer_data_frequency
-from src.risk_metrics import annualized_return, annualized_volatility, tail_risk_metrics
-from src.risk_adjusted_return import risk_adjusted_return_metrics
-from src.drawdown_analysis import calculate_drawdown, drawdown_frequency_summary, max_drawdown_details
-from src.rolling_metrics import add_rolling_metrics
-from src.signal_engine import generate_risk_signals
-from src.narrative_engine import generate_risk_narrative
-from src.visualization import generate_analysis_visualizations
 
 
 def format_percentage(value) -> str:
+    """
+    Format decimal values as percentages for console output.
+    """
     if pd.isna(value):
         return "NaN"
 
@@ -29,6 +30,9 @@ def format_percentage(value) -> str:
 
 
 def format_date(value) -> str:
+    """
+    Format timestamps for console output.
+    """
     if pd.isna(value):
         return "NaN"
 
@@ -36,147 +40,217 @@ def format_date(value) -> str:
 
 
 def format_return_table(df: pd.DataFrame, return_col: str) -> pd.DataFrame:
+    """
+    Format a return table for readable console output.
+    """
     display_table = df.copy()
     display_table[return_col] = display_table[return_col].map(format_percentage)
-
     return display_table
 
 
-if __name__ == "__main__":
-    file_path = "data/sample_nav_data.xlsx"
+def format_metric_label(metric_name: str) -> str:
+    """
+    Convert snake_case metric names into presentation-friendly labels.
+    """
+    label = metric_name.replace("_", " ").title()
+    return label.replace("Cvar", "CVaR").replace("Var", "VaR").replace("Es", "ES")
 
-    # Step 1: load NAV data
-    df = load_nav_data(file_path)
 
-    # Step 2: determine data frequency before any return or risk analysis
-    data_frequency, periods_per_year = infer_data_frequency(df, strict=True)
+def resolve_benchmark_path(benchmark_arg: str | None) -> str:
+    """
+    Resolve the benchmark file path from CLI input or default project locations.
+    """
+    if benchmark_arg:
+        return benchmark_arg
 
-    print(df.head())
-    print(df.info())
-    print(f"Detected Data Frequency: {data_frequency}")
-    print(f"Annualization Factor: {periods_per_year:.0f}")
+    for candidate in DEFAULT_BENCHMARK_CANDIDATES:
+        if Path(candidate).exists():
+            return candidate
 
-    # Step 3: calculate returns
-    df = calculate_daily_returns(df)
-    df = calculate_cumulative_returns(df)
-    return_metrics = return_summary_metrics(df)
-    monthly_return_table, annual_return_table = return_tables(df)
-
-    # Step 4: rolling metrics
-    df, rolling_windows = add_rolling_metrics(df, freq=data_frequency)
-    print(f"Rolling Windows: {rolling_windows}")
-
-    # Step 5: calculate risk metrics
-    ann_ret = annualized_return(df, periods_per_year=periods_per_year)
-    ann_vol = annualized_volatility(df, periods_per_year=periods_per_year)
-    tail_metrics = tail_risk_metrics(df, periods_per_year=periods_per_year)
-    risk_adjusted_metrics = risk_adjusted_return_metrics(df, periods_per_year=periods_per_year)
-
-    # Step 6: calculate drawdown
-    df = calculate_drawdown(df)
-    drawdown_details = max_drawdown_details(df)
-    drawdown_frequencies = drawdown_frequency_summary(df)
-
-    # Step 7: visualization
-    percentage_return_metrics = {
-        "inception_annualized_return",
-        "inception_return",
-        "year_to_date_return",
-        "one_year_return",
-        "win_rate",
-    }
-    percentage_risk_metrics = {
-        "annualized_return",
-        "annualized_volatility",
-        "max_drawdown",
-    }
-    percentage_tail_metrics = set(tail_metrics.keys())
-    percentage_metrics = (
-        percentage_return_metrics
-        | percentage_risk_metrics
-        | percentage_tail_metrics
-    )
-    metric_categories = {
-        "Data Profile": {
-            "data_frequency": data_frequency,
-            "annualization_factor": periods_per_year,
-        },
-        "Return Metrics": return_metrics,
-        "Risk Metrics": {
-            "annualized_return": ann_ret,
-            "annualized_volatility": ann_vol,
-            **drawdown_details,
-        },
-        "Tail Risk Metrics": tail_metrics,
-        "Risk-Adjusted Return Metrics": risk_adjusted_metrics,
-    }
-    risk_signals = generate_risk_signals(metric_categories=metric_categories, df=df)
-    metric_categories["Risk Signals"] = risk_signals
-    risk_narrative = generate_risk_narrative(risk_signals)
-    metric_categories["Risk Narrative"] = {
-        "risk_narrative": risk_narrative
-    }
-
-    metrics_summary_table = generate_analysis_visualizations(
-        df=df,
-        metric_categories=metric_categories,
-        monthly_return_table=monthly_return_table,
-        annual_return_table=annual_return_table,
-        drawdown_frequencies=drawdown_frequencies,
-        percentage_metrics=percentage_metrics,
+    raise ValueError(
+        "Benchmark input is required for the aligned analysis pipeline. "
+        "Pass --benchmark or add data/benchmark.xlsx, data/benchmark.csv, or data/benchmark.xls."
     )
 
-    print("=== NAV Data with Returns ===")
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the analysis runner.
+    """
+    parser = argparse.ArgumentParser(description="Run benchmark-aligned fund risk analysis.")
+    parser.add_argument(
+        "--input",
+        default=DEFAULT_INPUT_PATH,
+        help=f"Fund NAV file path. Supports CSV, XLSX, and XLS. Default: {DEFAULT_INPUT_PATH}",
+    )
+    parser.add_argument(
+        "--benchmark",
+        default=None,
+        help="Benchmark level file path. The second column must be a benchmark level series, not returns.",
+    )
+    parser.add_argument(
+        "--output",
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Output directory root. Charts will be saved under <output>/charts and reports under <output>/reports. Default: {DEFAULT_OUTPUT_DIR}",
+    )
+    parser.add_argument(
+        "--benchmark-name",
+        default=None,
+        help="Optional friendly benchmark name to display in charts, tables, and console output.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    """
+    Run the benchmark-aware CLI analysis flow and print key outputs.
+    """
+    args = parse_args()
+    benchmark_path = resolve_benchmark_path(args.benchmark)
+
+    print(f"Loading fund data: {args.input}")
+    print(f"Loading benchmark data: {benchmark_path}")
+    print("Benchmark assumption: the second benchmark column must be a level series, not precomputed returns.")
+    print("Alignment rule: fund NAV dates define the analysis timeline, and benchmark levels are mapped backward onto those dates.")
+
+    analysis = run_analysis_pipeline(
+        fund_input_path=args.input,
+        benchmark_input_path=benchmark_path,
+        output_dir=args.output,
+        benchmark_name=args.benchmark_name,
+    )
+
+    df = analysis["df"]
+    return_metrics = analysis["metric_categories"]["Return Metrics"]
+    risk_metrics = analysis["metric_categories"]["Risk Metrics"]
+    benchmark_metrics = analysis["metric_categories"]["Benchmark Comparison"]
+    tail_metrics = analysis["metric_categories"]["Tail Risk Metrics"]
+    risk_adjusted_metrics = analysis["metric_categories"]["Risk-Adjusted Return"]
+    metrics_summary_table = analysis["metrics_summary_table"]
+    alignment_metadata = analysis["alignment_metadata"]
+    benchmark_name = analysis["benchmark_name"]
+
+    print(f"Benchmark name used: {benchmark_name}")
+
+    print(f"Inferred fund frequency: {alignment_metadata['fund_frequency']}")
+    print(f"Inferred benchmark frequency: {alignment_metadata['benchmark_frequency']}")
+    print(f"Overlapping observations after alignment: {alignment_metadata['overlapping_observations']}")
+    print(f"Fund rows dropped before benchmark history starts: {alignment_metadata['dropped_unmatched_fund_rows']}")
+    print(f"Alignment method: {alignment_metadata['alignment_method']}")
+    print(
+        "Aligned date range: "
+        f"{format_date(alignment_metadata['aligned_start_date'])} to "
+        f"{format_date(alignment_metadata['aligned_end_date'])}"
+    )
+    print(f"Annualization factor: {analysis['periods_per_year']:.0f}")
+    print(f"Rolling windows: {analysis['rolling_windows']}")
+
+    print("\n=== Aligned Dataset Preview ===")
     display_df = df.copy()
-    numeric_cols = display_df.select_dtypes(include="number").columns
-    display_df[numeric_cols] = display_df[numeric_cols].round(6)
     if "date" in display_df.columns:
         display_df["date"] = pd.to_datetime(display_df["date"]).dt.strftime("%Y-%m-%d")
-    for return_col in ["daily_return", "cumulative_return"]:
+
+    preview_numeric_cols = [
+        col for col in ["nav", "benchmark", "fund_return", "benchmark_return", "excess_return", "cumulative_return"]
+        if col in display_df.columns
+    ]
+    display_df[preview_numeric_cols] = display_df[preview_numeric_cols].round(6)
+    for return_col in ["fund_return", "benchmark_return", "excess_return", "cumulative_return"]:
         if return_col in display_df.columns:
             display_df[return_col] = df[return_col].map(format_percentage)
-    print(display_df)
+    print(display_df.head(12).to_string(index=False))
+
     print("\n=== Return Metrics ===")
     for metric_name, metric_value in return_metrics.items():
-        if pd.isna(metric_value):
-            print(f"{metric_name}: NaN")
-        elif "months" in metric_name:
-            print(f"{metric_name}: {metric_value}")
-        elif metric_name in percentage_return_metrics:
-            print(f"{metric_name}: {format_percentage(metric_value)}")
+        if "months" in metric_name:
+            print(f"{format_metric_label(metric_name)}: {metric_value:.0f}")
+        elif metric_name in {"return_skewness"}:
+            print(
+                f"{format_metric_label(metric_name)}: {metric_value:.4f}"
+                if pd.notna(metric_value)
+                else f"{format_metric_label(metric_name)}: NaN"
+            )
         else:
-            print(f"{metric_name}: {metric_value:.4f}")
+            print(f"{format_metric_label(metric_name)}: {format_percentage(metric_value)}")
+
+    print(f"\n=== Benchmark Comparison vs {benchmark_name} ===")
+    for metric_name, metric_value in benchmark_metrics.items():
+        if metric_name == "information_ratio":
+            print(
+                f"{format_metric_label(metric_name)}: {metric_value:.4f}"
+                if pd.notna(metric_value)
+                else f"{format_metric_label(metric_name)}: NaN"
+            )
+        else:
+            print(f"{format_metric_label(metric_name)}: {format_percentage(metric_value)}")
+
     print("\n=== Monthly Returns ===")
-    print(format_return_table(monthly_return_table, "monthly_return").to_string(index=False))
+    print(format_return_table(analysis["monthly_return_table"], "monthly_return").to_string(index=False))
+    print(f"\n=== Monthly Returns: {benchmark_name} ===")
+    print(
+        format_return_table(
+            analysis["benchmark_monthly_return_table"],
+            "benchmark_monthly_return",
+        ).to_string(index=False)
+    )
+    print(f"\n=== Monthly Excess Returns vs {benchmark_name} ===")
+    print(
+        format_return_table(
+            analysis["monthly_excess_return_table"][["month", "monthly_excess_return"]].copy(),
+            "monthly_excess_return",
+        ).to_string(index=False)
+    )
     print("\n=== Annual Returns ===")
-    print(format_return_table(annual_return_table, "annual_return").to_string(index=False))
+    print(format_return_table(analysis["annual_return_table"], "annual_return").to_string(index=False))
+    print(f"\n=== Annual Returns: {benchmark_name} ===")
+    print(
+        format_return_table(
+            analysis["benchmark_annual_return_table"],
+            "benchmark_annual_return",
+        ).to_string(index=False)
+    )
+
     print("\n=== Risk Metrics ===")
-    print(f"Annualized Return: {format_percentage(ann_ret)}")
-    print(f"Annualized Volatility: {format_percentage(ann_vol)}")
-    print(f"Maximum Drawdown: {format_percentage(drawdown_details['max_drawdown'])}")
-    print(f"Maximum Drawdown Date: {format_date(drawdown_details['max_drawdown_date'])}")
-    recovery_days = drawdown_details["max_drawdown_recovery_days"]
-    if recovery_days == recovery_days:
+    print(f"Annualized Return: {format_percentage(risk_metrics['annualized_return'])}")
+    print(f"Annualized Volatility: {format_percentage(risk_metrics['annualized_volatility'])}")
+    print(f"Maximum Drawdown: {format_percentage(risk_metrics['max_drawdown'])}")
+    print(f"Maximum Drawdown Date: {format_date(risk_metrics['max_drawdown_date'])}")
+    recovery_days = risk_metrics["max_drawdown_recovery_days"]
+    if pd.notna(recovery_days):
         print(f"Maximum Drawdown Recovery Days: {recovery_days:.0f}")
     else:
         print("Maximum Drawdown Recovery Days: Not recovered")
+
     print("\n=== Tail Risk Metrics ===")
     for metric_name, metric_value in tail_metrics.items():
-        print(f"{metric_name}: {format_percentage(metric_value)}")
+        print(f"{format_metric_label(metric_name)}: {format_percentage(metric_value)}")
+
     print("\n=== Risk-Adjusted Return Metrics ===")
     for metric_name, metric_value in risk_adjusted_metrics.items():
         if pd.isna(metric_value):
-            print(f"{metric_name}: NaN")
+            print(f"{format_metric_label(metric_name)}: NaN")
         else:
-            print(f"{metric_name}: {metric_value:.4f}")
+            print(f"{format_metric_label(metric_name)}: {metric_value:.4f}")
+
     print("\n=== Risk Signals ===")
-    for signal_name, signal_value in risk_signals.items():
-        print(f"{signal_name}: {signal_value}")
+    for signal_name, signal_value in analysis["risk_signals"].items():
+        print(f"{format_metric_label(signal_name)}: {signal_value}")
+
     print("\n=== Risk Narrative ===")
-    print(risk_narrative)
+    print(analysis["risk_narrative"])
+
     print("\n=== Drawdown Frequency ===")
-    for frequency_name, frequency_table in drawdown_frequencies.items():
+    for frequency_name, frequency_table in analysis["drawdown_frequencies"].items():
         print(f"\n{frequency_name.title()}")
         print(frequency_table.to_string(index=False))
+
     print("\n=== Metrics Summary Table ===")
     print(metrics_summary_table.to_string(index=False))
+
+    print("\nAnalysis completed successfully.")
+    print(f"Charts saved under: {os.path.join(args.output, 'charts')}")
+    print(f"Reports saved under: {os.path.join(args.output, 'reports')}")
+
+
+if __name__ == "__main__":
+    main()

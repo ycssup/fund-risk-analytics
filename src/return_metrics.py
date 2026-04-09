@@ -31,13 +31,10 @@ def _total_return(start_nav: float, end_nav: float) -> float:
 
 def calculate_periodic_returns(
     df: pd.DataFrame,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
 ) -> pd.DataFrame:
     """
     Calculate periodic returns based on NAV.
-
-    The default column name remains daily_return for compatibility with existing
-    risk and rolling metric functions.
     """
     df = _prepare_nav_data(df)
     df[return_col] = df["nav"].pct_change()
@@ -47,14 +44,17 @@ def calculate_periodic_returns(
 
 def calculate_daily_returns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Backward-compatible alias for calculate_periodic_returns.
+    Legacy alias for calculate_periodic_returns.
+
+    The project uses frequency-neutral return columns such as fund_return,
+    benchmark_return, and excess_return in all downstream outputs.
     """
-    return calculate_periodic_returns(df, return_col="daily_return")
+    return calculate_periodic_returns(df, return_col="fund_return")
 
 
 def calculate_cumulative_returns(
     df: pd.DataFrame,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
     cumulative_return_col: str = "cumulative_return",
 ) -> pd.DataFrame:
     """
@@ -149,7 +149,7 @@ def one_year_return(df: pd.DataFrame) -> float:
     return _total_return(start_nav, latest_nav)
 
 
-def win_rate(df: pd.DataFrame, return_col: str = "daily_return") -> float:
+def win_rate(df: pd.DataFrame, return_col: str = "fund_return") -> float:
     """
     Calculate the share of positive return observations.
     """
@@ -187,6 +187,42 @@ def monthly_returns(df: pd.DataFrame) -> pd.DataFrame:
     return returns.rename("monthly_return").reset_index().assign(month=lambda x: x["month"].astype(str))
 
 
+def monthly_returns_from_levels(
+    df: pd.DataFrame,
+    level_col: str,
+    output_col: str,
+) -> pd.DataFrame:
+    """
+    Calculate calendar monthly returns from any aligned level series.
+    """
+    required_columns = {"date", level_col}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {missing_columns}")
+
+    level_data = df[["date", level_col]].copy()
+    level_data["date"] = pd.to_datetime(level_data["date"], errors="coerce")
+    level_data[level_col] = pd.to_numeric(level_data[level_col], errors="coerce")
+    level_data = level_data.dropna(subset=["date", level_col]).sort_values("date").reset_index(drop=True)
+
+    if level_data.empty:
+        return pd.DataFrame(columns=["month", output_col])
+
+    level_data["month"] = level_data["date"].dt.to_period("M")
+    month_end_level = level_data.groupby("month")[level_col].last()
+    month_start_level = level_data.groupby("month")[level_col].first()
+    returns = month_end_level.pct_change()
+
+    if len(returns) > 0:
+        first_month = returns.index[0]
+        returns.iloc[0] = _total_return(
+            month_start_level.loc[first_month],
+            month_end_level.loc[first_month],
+        )
+
+    return returns.rename(output_col).reset_index().assign(month=lambda x: x["month"].astype(str))
+
+
 def annual_returns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate calendar annual returns.
@@ -211,7 +247,43 @@ def annual_returns(df: pd.DataFrame) -> pd.DataFrame:
     return returns.rename("annual_return").reset_index()
 
 
-def return_skewness(df: pd.DataFrame, return_col: str = "daily_return") -> float:
+def annual_returns_from_levels(
+    df: pd.DataFrame,
+    level_col: str,
+    output_col: str,
+) -> pd.DataFrame:
+    """
+    Calculate calendar annual returns from any aligned level series.
+    """
+    required_columns = {"date", level_col}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {missing_columns}")
+
+    level_data = df[["date", level_col]].copy()
+    level_data["date"] = pd.to_datetime(level_data["date"], errors="coerce")
+    level_data[level_col] = pd.to_numeric(level_data[level_col], errors="coerce")
+    level_data = level_data.dropna(subset=["date", level_col]).sort_values("date").reset_index(drop=True)
+
+    if level_data.empty:
+        return pd.DataFrame(columns=["year", output_col])
+
+    level_data["year"] = level_data["date"].dt.year
+    year_end_level = level_data.groupby("year")[level_col].last()
+    first_year_level = level_data.groupby("year")[level_col].first()
+    returns = year_end_level.pct_change()
+
+    if len(returns) > 0:
+        first_year = returns.index[0]
+        returns.iloc[0] = _total_return(
+            first_year_level.loc[first_year],
+            year_end_level.loc[first_year],
+        )
+
+    return returns.rename(output_col).reset_index()
+
+
+def return_skewness(df: pd.DataFrame, return_col: str = "fund_return") -> float:
     """
     Calculate skewness of return distribution.
     """

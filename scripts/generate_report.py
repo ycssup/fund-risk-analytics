@@ -16,39 +16,25 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.data_loader import load_nav_data
-from src.drawdown_analysis import calculate_drawdown, drawdown_frequency_summary, max_drawdown_details
-from src.frequency import infer_data_frequency
-from src.return_metrics import (
-    calculate_cumulative_returns,
-    calculate_daily_returns,
-    return_summary_metrics,
-    return_tables,
+from src.analysis_pipeline import run_analysis_pipeline
+from src.visualization import (
+    CHART_DIR,
+    REPORT_DIR,
+    _resolve_output_dirs,
+    build_monthly_returns_heatmap_table,
+    draw_monthly_returns_heatmap_table,
+    save_metrics_summary_table_image,
+    split_metric_categories_for_pages,
 )
-from src.risk_adjusted_return import risk_adjusted_return_metrics
-from src.risk_metrics import annualized_return, annualized_volatility, tail_risk_metrics
-from src.rolling_metrics import add_rolling_metrics
-from src.signal_engine import generate_risk_signals
-from src.narrative_engine import generate_risk_narrative
-from src.visualization import CHART_DIR, REPORT_DIR, generate_analysis_visualizations
 
 
 DEFAULT_INPUT_PATH = "data/sample_nav_data.xlsx"
 DEFAULT_OUTPUT_PATH = f"{REPORT_DIR}/fund_risk_report.pdf"
-
-
-def _percentage_metric_names(tail_metrics: Dict[str, float]) -> set:
-    return {
-        "inception_annualized_return",
-        "inception_return",
-        "year_to_date_return",
-        "one_year_return",
-        "win_rate",
-        "annualized_return",
-        "annualized_volatility",
-        "max_drawdown",
-        *tail_metrics.keys(),
-    }
+DEFAULT_BENCHMARK_CANDIDATES = (
+    "data/benchmark.xlsx",
+    "data/benchmark.csv",
+    "data/benchmark.xls",
+)
 
 
 def _format_metric_value(value, metric_name: str, percentage_metrics: Iterable[str]) -> str:
@@ -73,17 +59,22 @@ def _format_metric_value(value, metric_name: str, percentage_metrics: Iterable[s
     return str(value)
 
 
+def _display_metric_label(metric_name: str) -> str:
+    label = str(metric_name).replace("_", " ").title()
+    return label.replace("Cvar", "CVaR").replace("Var", "VaR").replace("Es", "ES")
+
+
 def _flatten_metric_categories(
     metric_categories: Dict[str, Dict[str, object]],
     percentage_metrics: Iterable[str],
 ) -> pd.DataFrame:
     rows = []
     for category, metrics in metric_categories.items():
-        for metric_name, metric_value in metrics.items():
+        for index, (metric_name, metric_value) in enumerate(metrics.items()):
             rows.append(
                 {
-                    "Category": category,
-                    "Metric": metric_name,
+                    "Category": category if index == 0 else "",
+                    "Metric": _display_metric_label(metric_name),
                     "Value": _format_metric_value(metric_value, metric_name, percentage_metrics),
                 }
             )
@@ -148,10 +139,12 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
     profile = metrics["Data Profile"]
     returns = metrics["Return Metrics"]
     risks = metrics["Risk Metrics"]
+    benchmark = metrics.get("Benchmark Comparison", {})
     tail = metrics["Tail Risk Metrics"]
-    adj = metrics["Risk-Adjusted Return Metrics"]
+    adj = metrics["Risk-Adjusted Return"]
+    benchmark_name = analysis.get("benchmark_name", profile.get("benchmark_name", "Benchmark"))
 
-    data_frequency = profile.get("data_frequency", "unknown")
+    data_frequency = profile.get("frequency", "unknown")
     annualization_factor = profile.get("annualization_factor", np.nan)
     rolling_windows = profile.get("rolling_windows", "not available")
     start_date = _fmt_date(profile.get("start_date", pd.NaT))
@@ -175,6 +168,84 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
     calmar = adj.get("calmar_ratio", np.nan)
     treynor = adj.get("treynor_ratio", np.nan)
     treynor_black = adj.get("treynor_black_ratio", np.nan)
+    benchmark_return = benchmark.get("benchmark_return", np.nan)
+    excess_return = benchmark.get("excess_return", np.nan)
+    tracking_error = benchmark.get("tracking_error", np.nan)
+    information_ratio = benchmark.get("information_ratio", np.nan)
+    df = analysis.get("df", pd.DataFrame())
+    clean_returns = (
+        pd.to_numeric(df.get("fund_return"), errors="coerce").dropna()
+        if "fund_return" in df.columns
+        else pd.Series(dtype=float)
+    )
+
+    var_95 = tail.get("var_95_period", np.nan)
+    var_99 = tail.get("var_99_period", np.nan)
+    cvar_95 = tail.get("cvar_es_95_period", np.nan)
+    cvar_99 = tail.get("cvar_es_99_period", np.nan)
+
+    q95_return = clean_returns.quantile(0.05) if len(clean_returns) else np.nan
+    q99_return = clean_returns.quantile(0.01) if len(clean_returns) else np.nan
+    q95_tail_count = int((clean_returns <= q95_return).sum()) if len(clean_returns) else 0
+    q99_tail_count = int((clean_returns <= q99_return).sum()) if len(clean_returns) else 0
+
+    var_levels_overlap = (
+        pd.notna(var_95)
+        and pd.notna(var_99)
+        and np.isclose(var_95, var_99, rtol=1e-6, atol=1e-6)
+    )
+    cvar_levels_overlap = (
+        pd.notna(cvar_95)
+        and pd.notna(cvar_99)
+        and np.isclose(cvar_95, cvar_99, rtol=1e-6, atol=1e-6)
+    )
+
+    if pd.isna(excess_return):
+        benchmark_summary_sentence = (
+            f"{benchmark_name} delivered an annualized return of {_fmt_pct(benchmark_return)} over the aligned sample, "
+            "while annualized excess return is not available."
+        )
+    else:
+        benchmark_direction = "outperformed" if excess_return >= 0 else "underperformed"
+        benchmark_gap = _fmt_pct(abs(excess_return))
+        benchmark_summary_sentence = (
+            f"{benchmark_name} delivered an annualized return of {_fmt_pct(benchmark_return)} over the aligned sample, "
+            f"and the fund {benchmark_direction} {benchmark_name} by {benchmark_gap} on an annualized basis."
+        )
+
+    if var_levels_overlap:
+        var_interpretation_sentence = (
+            f"The 95% one-period VaR is {_fmt_pct(var_95)}, and the corresponding 99% one-period VaR is also {_fmt_pct(var_99)}. "
+            "In this sample, both confidence levels map to the same extreme historical observation, which can occur when the return history is limited or observed at a lower frequency such as weekly data. "
+            "This indicates that tail risk differentiation is limited within the available sample, so the incremental severity normally associated with the 99% threshold is not observable here."
+        )
+    else:
+        var_interpretation_sentence = (
+            f"The 95% one-period VaR is {_fmt_pct(var_95)}, while the 99% one-period VaR is {_fmt_pct(var_99)}. "
+            "The 99% confidence level isolates a narrower and typically more adverse segment of the historical loss distribution."
+        )
+
+    if cvar_levels_overlap:
+        cvar_interpretation_sentence = (
+            f"The 95% one-period CVaR/ES is {_fmt_pct(cvar_95)}, while the 99% one-period CVaR/ES is {_fmt_pct(cvar_99)}. "
+            "This indicates that the tail contains very few distinct observations; in sparse samples, CVaR can converge to VaR when only a small number of returns fall into the tail. "
+            "In that setting, VaR-based measures alone provide limited differentiation across extreme loss states and may understate the severity of downside outcomes beyond the observed tail."
+        )
+    else:
+        cvar_interpretation_sentence = (
+            f"The 95% one-period CVaR/ES is {_fmt_pct(cvar_95)}, while the 99% one-period CVaR/ES is {_fmt_pct(cvar_99)}. "
+            "CVaR/ES measures the average realized loss within the tail and therefore complements VaR by describing loss severity beyond the threshold."
+        )
+
+    tail_warning_sentence = (
+        f"Tail risk estimates are based on a limited number of tail observations in this sample "
+        f"(approximately {q95_tail_count} observations at the 95% threshold and {q99_tail_count} at the 99% threshold) "
+        "and may not fully capture extreme loss scenarios. In such cases, greater weight should be placed on drawdown analysis, volatility persistence, and other path-dependent measures when assessing downside risk."
+        if q95_tail_count < 5 or q99_tail_count < 5
+        else (
+            "Tail risk estimates should be interpreted with caution because their stability depends on both sample depth and data frequency, and complementary evidence from drawdown behaviour and volatility persistence remains important for risk assessment."
+        )
+    )
 
     recovery_text = (
         "not recovered within the available sample"
@@ -188,6 +259,10 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
                 f"The report is based on {observations} NAV observations from {start_date} "
                 f"to {end_date}. The detected data frequency is {data_frequency}, so the "
                 f"analysis uses an annualization factor of {annualization_factor:.0f}."
+            ),
+            (
+                "The fund NAV date series defines the analysis timeline. Benchmark levels are "
+                f"aligned to those dates using the most recent {benchmark_name} observation on or before each fund date."
             ),
             (
                 f"Rolling metrics are calculated with frequency-aware windows: {rolling_windows}. "
@@ -228,26 +303,28 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
                 "captures how persistently the fund stayed below prior highs."
             ),
         ],
+        "Benchmark Relative Commentary": [
+            (benchmark_summary_sentence),
+            (
+                f"Tracking error is {_fmt_pct(tracking_error)}, and the information ratio is {_fmt_num(information_ratio)}. "
+                f"These measures summarize both the magnitude and efficiency of active return relative to {benchmark_name}."
+            ),
+            (
+                f"Benchmark data is aligned to fund NAV dates using the most recent available {benchmark_name} observation "
+                "on or before each fund date."
+            ),
+        ],
         "Tail Risk Commentary": [
             (
-                f"The 95% 1-day equivalent VaR (scaled from {data_frequency} returns) is {_fmt_pct(tail.get('var_95_1d_scaled', np.nan))}, "
-                f"and the corresponding 10-day VaR is {_fmt_pct(tail.get('var_95_10d', np.nan))}. "
-                "These figures estimate downside loss under historical simulation assumptions."
+                f"{var_interpretation_sentence} "
+                f"The corresponding 10-period VaR at 95% is {_fmt_pct(tail.get('var_95_10_period', np.nan))}."
             ),
             (
-                f"The 99% 1-day equivalent VaR (scaled from {data_frequency} returns) is {_fmt_pct(tail.get('var_99_1d_scaled', np.nan))}, "
-                f"and the corresponding 10-day VaR is {_fmt_pct(tail.get('var_99_10d', np.nan))}. "
-                "The 99% confidence level focuses on more severe tail observations."
+                f"The corresponding 10-period VaR at 99% is {_fmt_pct(tail.get('var_99_10_period', np.nan))}. "
+                f"These figures are estimated under historical simulation using the native {data_frequency} return frequency."
             ),
             (
-                f"The 95% 1-day equivalent CVaR/ES (scaled from {data_frequency} returns) is {_fmt_pct(tail.get('cvar_es_95_1d_scaled', np.nan))}, "
-                f"while the 99% 1-day equivalent CVaR/ES (scaled from {data_frequency} returns) is {_fmt_pct(tail.get('cvar_es_99_1d_scaled', np.nan))}. "
-                "CVaR/ES estimates the average loss within the tail, so it is useful for "
-                "understanding loss severity beyond the VaR threshold."
-            ),
-            (
-                "Note: For non-daily data, short-horizon VaR and CVaR are scaled estimates based on "
-                "the underlying return frequency."
+                f"{cvar_interpretation_sentence} {tail_warning_sentence}"
             ),
         ],
         "Risk-Adjusted Return Commentary": [
@@ -263,8 +340,7 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
             ),
             (
                 f"The Treynor ratio is {_fmt_num(treynor)} and the Treynor-Black ratio is "
-                f"{_fmt_num(treynor_black)}. These values are NaN when the input data does not "
-                "include a benchmark_return column."
+                f"{_fmt_num(treynor_black)}. These metrics depend on the aligned benchmark return series."
             ),
         ],
     }
@@ -275,7 +351,7 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
 def generate_conclusion_page(analysis: dict) -> List[str]:
     metrics = analysis["metric_categories"]
     risks = metrics["Risk Metrics"]
-    adj = metrics["Risk-Adjusted Return Metrics"]
+    adj = metrics["Risk-Adjusted Return"]
 
     ann_vol = risks.get("annualized_volatility", np.nan)
     max_dd = risks.get("max_drawdown", np.nan)
@@ -321,81 +397,33 @@ def generate_conclusion_page(analysis: dict) -> List[str]:
     return conclusion
 
 
-def run_full_analysis(input_path: str) -> dict:
-    df = load_nav_data(input_path)
+def run_full_analysis(
+    input_path: str,
+    benchmark_path: str,
+    output_root: str = "output",
+    benchmark_name: str | None = None,
+) -> dict:
+    """
+    Run the shared benchmark-aware analysis pipeline for report generation.
 
-    data_frequency, periods_per_year = infer_data_frequency(df, strict=True)
-
-    df = calculate_daily_returns(df)
-    df = calculate_cumulative_returns(df)
-    return_metrics = return_summary_metrics(df)
-    monthly_return_table, annual_return_table = return_tables(df)
-
-    df, rolling_windows = add_rolling_metrics(df, freq=data_frequency)
-
-    ann_ret = annualized_return(df, periods_per_year=periods_per_year)
-    ann_vol = annualized_volatility(df, periods_per_year=periods_per_year)
-    tail_metrics = tail_risk_metrics(df, periods_per_year=periods_per_year)
-    risk_adjusted_metrics = risk_adjusted_return_metrics(df, periods_per_year=periods_per_year)
-
-    df = calculate_drawdown(df)
-    drawdown_details = max_drawdown_details(df)
-    drawdown_frequencies = drawdown_frequency_summary(df)
-
-    percentage_metrics = _percentage_metric_names(tail_metrics)
-    metric_categories = {
-        "Data Profile": {
-            "input_file": input_path,
-            "start_date": df["date"].min(),
-            "end_date": df["date"].max(),
-            "observations": len(df),
-            "data_frequency": data_frequency,
-            "annualization_factor": periods_per_year,
-            "rolling_windows": ", ".join(str(window) for window in rolling_windows),
-        },
-        "Return Metrics": return_metrics,
-        "Risk Metrics": {
-            "annualized_return": ann_ret,
-            "annualized_volatility": ann_vol,
-            **drawdown_details,
-        },
-        "Tail Risk Metrics": tail_metrics,
-        "Risk-Adjusted Return Metrics": risk_adjusted_metrics,
-    }
-    risk_signals = generate_risk_signals(metric_categories=metric_categories, df=df)
-    metric_categories["Risk Signals"] = risk_signals
-    risk_narrative = generate_risk_narrative(risk_signals)
-    metric_categories["Risk Narrative"] = {
-        "risk_narrative": risk_narrative
-    }
-
-    metrics_summary_table = generate_analysis_visualizations(
-        df=df,
-        metric_categories=metric_categories,
-        monthly_return_table=monthly_return_table,
-        annual_return_table=annual_return_table,
-        drawdown_frequencies=drawdown_frequencies,
-        percentage_metrics=percentage_metrics,
+    The fund NAV dates define the target timeline, and benchmark levels are
+    aligned backward onto those same dates before returns are calculated.
+    """
+    analysis = run_analysis_pipeline(
+        fund_input_path=input_path,
+        benchmark_input_path=benchmark_path,
+        output_dir=output_root,
+        benchmark_name=benchmark_name,
     )
     save_monthly_returns_heatmap_table(
-        monthly_return_table=monthly_return_table,
-        annual_return_table=annual_return_table,
+        monthly_return_table=analysis["monthly_return_table"],
+        benchmark_monthly_return_table=analysis["benchmark_monthly_return_table"],
+        monthly_excess_return_table=analysis["monthly_excess_return_table"],
+        annual_return_table=analysis["annual_return_table"],
+        benchmark_annual_return_table=analysis["benchmark_annual_return_table"],
+        output_path=os.path.join(_resolve_output_dirs(output_root)[0], "monthly_returns_heatmap_table.png"),
     )
-
-    return {
-        "df": df,
-        "metric_categories": metric_categories,
-        "metrics_summary_table": metrics_summary_table,
-        "percentage_metrics": percentage_metrics,
-        "monthly_return_table": monthly_return_table,
-        "annual_return_table": annual_return_table,
-        "drawdown_frequencies": drawdown_frequencies,
-        "data_frequency": data_frequency,
-        "periods_per_year": periods_per_year,
-        "rolling_windows": rolling_windows,
-        "risk_signals": risk_signals,
-        "risk_narrative": risk_narrative,
-    }
+    return analysis
 
 
 def _add_footer(fig, page_number: int) -> None:
@@ -406,25 +434,29 @@ def _save_cover_page(pdf: PdfPages, analysis: dict, input_path: str, page_number
     metrics = analysis["metric_categories"]
     risk_metrics = metrics["Risk Metrics"]
     return_metrics = metrics["Return Metrics"]
-    risk_adjusted = metrics["Risk-Adjusted Return Metrics"]
+    benchmark_metrics = metrics.get("Benchmark Comparison", {})
+    risk_adjusted = metrics["Risk-Adjusted Return"]
     percentage_metrics = analysis["percentage_metrics"]
+    benchmark_name = analysis.get("benchmark_name", metrics["Data Profile"].get("benchmark_name", "Benchmark"))
 
     fig = plt.figure(figsize=(11, 8.5))
     fig.patch.set_facecolor("white")
-    fig.text(0.08, 0.88, "Fund Risk Assessment Report", fontsize=24, weight="bold")
-    fig.text(0.08, 0.82, f"Input file: {input_path}", fontsize=11)
-    fig.text(0.08, 0.78, f"Generated date: {datetime.now().strftime('%Y-%m-%d')}", fontsize=11)
+    fig.text(0.08, 0.88, f"Fund Risk Assessment Report vs {benchmark_name}", fontsize=24, weight="bold")
 
     profile = metrics["Data Profile"]
     summary_rows = [
-        ("Data Frequency", profile["data_frequency"]),
+        ("Data Frequency", profile["frequency"]),
         ("Annualization Factor", _format_metric_value(profile["annualization_factor"], "annualization_factor", percentage_metrics)),
         ("Rolling Windows", profile["rolling_windows"]),
         ("Inception Annualized Return", _format_metric_value(return_metrics["inception_annualized_return"], "inception_annualized_return", percentage_metrics)),
         ("Inception Return", _format_metric_value(return_metrics["inception_return"], "inception_return", percentage_metrics)),
+        (f"{benchmark_name} Return", _format_metric_value(benchmark_metrics.get("benchmark_return", np.nan), "benchmark_return", percentage_metrics)),
+        (f"Excess Return vs {benchmark_name}", _format_metric_value(benchmark_metrics.get("excess_return", np.nan), "excess_return", percentage_metrics)),
         ("Annualized Volatility", _format_metric_value(risk_metrics["annualized_volatility"], "annualized_volatility", percentage_metrics)),
         ("Maximum Drawdown", _format_metric_value(risk_metrics["max_drawdown"], "max_drawdown", percentage_metrics)),
         ("Maximum Drawdown Date", _format_metric_value(risk_metrics["max_drawdown_date"], "max_drawdown_date", percentage_metrics)),
+        ("Tracking Error", _format_metric_value(benchmark_metrics.get("tracking_error", np.nan), "tracking_error", percentage_metrics)),
+        ("Information Ratio", _format_metric_value(benchmark_metrics.get("information_ratio", np.nan), "information_ratio", percentage_metrics)),
         ("Sharpe Ratio", _format_metric_value(risk_adjusted["sharpe_ratio"], "sharpe_ratio", percentage_metrics)),
         ("Sortino Ratio", _format_metric_value(risk_adjusted["sortino_ratio"], "sortino_ratio", percentage_metrics)),
         ("Calmar Ratio", _format_metric_value(risk_adjusted["calmar_ratio"], "calmar_ratio", percentage_metrics)),
@@ -572,112 +604,15 @@ def _save_image_page(pdf: PdfPages, image_path: str, title: str, page_number: in
     return page_number + 1
 
 
-def _parse_percent_string(value) -> float:
-    """
-    Convert a formatted percentage string like '12.34%' to a decimal number.
-    Returns NaN when the value is blank or invalid.
-    """
-    if not isinstance(value, str) or value == "" or not value.endswith("%"):
-        return np.nan
-
-    try:
-        return float(value.rstrip("%")) / 100
-    except ValueError:
-        return np.nan
-
-
-def _heatmap_fill_color(value: float, max_abs_value: float) -> str:
-    """
-    Return a heatmap background color for return values.
-
-    Positive returns use red shades, negative returns use green shades.
-    Larger absolute values get deeper colors.
-    """
-    if np.isnan(value) or max_abs_value <= 0:
-        return "#FFFFFF"
-
-    intensity = min(abs(value) / max_abs_value, 1.0)
-
-    # Light base + deeper tone as intensity increases.
-    if value > 0:
-        red = 255
-        green = int(245 - 120 * intensity)
-        blue = int(245 - 120 * intensity)
-    elif value < 0:
-        red = int(245 - 120 * intensity)
-        green = 255
-        blue = int(245 - 120 * intensity)
-    else:
-        return "#F7F7F7"
-
-    return f"#{red:02X}{green:02X}{blue:02X}"
-
-
-def _build_monthly_returns_summary_table(
-    monthly_return_table: pd.DataFrame,
-    annual_return_table: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Build a year-by-month return table with annual return and monthly win rate.
-
-    Output columns:
-    - Year
-    - Jan ... Dec
-    - Annual Return
-    - Win Rate
-    """
-    if monthly_return_table.empty:
-        return pd.DataFrame(
-            columns=[
-                "Year", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-                "Annual Return", "Win Rate",
-            ]
-        )
-
-    month_data = monthly_return_table.copy()
-    month_data["month_period"] = pd.PeriodIndex(month_data["month"], freq="M")
-    month_data["Year"] = month_data["month_period"].dt.year
-    month_data["month_num"] = month_data["month_period"].dt.month
-
-    month_name_map = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
-        7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
-    }
-    month_data["month_name"] = month_data["month_num"].map(month_name_map)
-
-    pivot = month_data.pivot(index="Year", columns="month_name", values="monthly_return")
-    ordered_months = list(month_name_map.values())
-    pivot = pivot.reindex(columns=ordered_months)
-
-    annual_data = annual_return_table.copy()
-    annual_data = annual_data.rename(columns={"year": "Year", "annual_return": "Annual Return"})
-    annual_data["Year"] = annual_data["Year"].astype(int)
-
-    win_rate = (
-        month_data.groupby("Year")["monthly_return"]
-        .apply(lambda values: (values > 0).mean() if len(values) else np.nan)
-        .rename("Win Rate")
-    )
-
-    summary = pivot.join(annual_data.set_index("Year"), how="left").join(win_rate, how="left")
-    summary = summary.reset_index()
-
-    for col in ordered_months + ["Annual Return", "Win Rate"]:
-        if col in summary.columns:
-            summary[col] = summary[col].map(
-                lambda value: "" if pd.isna(value) else f"{value:.2%}"
-            )
-
-    return summary
-
-
 def _save_return_charts_and_table_section(
     pdf: PdfPages,
     annual_image_path: str,
     monthly_image_path: str,
     monthly_return_table: pd.DataFrame,
+    benchmark_monthly_return_table: pd.DataFrame,
+    monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
+    benchmark_annual_return_table: pd.DataFrame,
     page_number: int,
 ) -> int:
     """
@@ -685,9 +620,12 @@ def _save_return_charts_and_table_section(
     - upper half: annual return chart and monthly return chart
     - lower half: year-by-month return heatmap table
     """
-    summary_table = _build_monthly_returns_summary_table(
+    summary_table = build_monthly_returns_heatmap_table(
         monthly_return_table=monthly_return_table,
+        benchmark_monthly_return_table=benchmark_monthly_return_table,
+        monthly_excess_return_table=monthly_excess_return_table,
         annual_return_table=annual_return_table,
+        benchmark_annual_return_table=benchmark_annual_return_table,
     )
 
     fig = plt.figure(figsize=(11, 8.5))
@@ -708,64 +646,70 @@ def _save_return_charts_and_table_section(
         ax_monthly_chart.axis("off")
         fig.text(0.52, 0.88, "Monthly Return", fontsize=11, weight="bold")
 
-    ax_table = fig.add_axes([0.05, 0.05, 0.90, 0.36])
+    ax_table = fig.add_axes([0.05, 0.04, 0.90, 0.34])
     ax_table.axis("off")
 
     if summary_table.empty:
         ax_table.text(0.0, 0.9, "No monthly return table is available.", fontsize=10.5)
     else:
-        table = ax_table.table(
-            cellText=summary_table.values,
-            colLabels=summary_table.columns,
-            cellLoc="center",
-            colLoc="center",
-            loc="center",
+        draw_monthly_returns_heatmap_table(
+            ax=ax_table,
+            summary_table=summary_table,
+            bbox=(0.0, 0.0, 1.0, 0.88),
+            header_fontsize=7.5,
+            body_fontsize=7.1,
         )
-        table.auto_set_font_size(False)
-        table.set_fontsize(7.2)
-        table.scale(1, 1.2)
 
-        month_columns = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
-        annual_return_col = summary_table.columns.get_loc("Annual Return")
-        win_rate_col = summary_table.columns.get_loc("Win Rate")
-        return_columns = month_columns | {"Annual Return"}
-        heatmap_values = []
+    _add_footer(fig, page_number)
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
 
-        for _, row_data in summary_table.iterrows():
-            for column_name in summary_table.columns:
-                if column_name in return_columns:
-                    parsed_value = _parse_percent_string(row_data[column_name])
-                    if not np.isnan(parsed_value):
-                        heatmap_values.append(parsed_value)
+    return page_number + 1
 
-        max_abs_value = max((abs(value) for value in heatmap_values), default=0.0)
 
-        for (row, col), cell in table.get_celld().items():
-            if row == 0:
-                cell.set_text_props(weight="bold")
-                cell.set_facecolor("#E6E6E6")
-                if col == annual_return_col:
-                    cell.set_facecolor("#E6E6E6")
-                continue
+def _save_large_image_page(
+    pdf: PdfPages,
+    image_path: str,
+    title: str,
+    page_number: int,
+    figsize: Tuple[float, float] = (13.5, 8.5),
+) -> int:
+    """
+    Save one dedicated image page with the image scaled to occupy most of the
+    available page area while preserving aspect ratio.
+    """
+    if not os.path.exists(image_path):
+        return page_number
 
-            cell_value = summary_table.iloc[row - 1, col]
-            column_name = summary_table.columns[col]
+    image = plt.imread(image_path)
+    image_height, image_width = image.shape[:2]
+    image_aspect = image_width / image_height if image_height else 1.0
 
-            if col == annual_return_col:
-                cell.set_text_props(weight="bold")
+    fig = plt.figure(figsize=figsize)
+    fig.patch.set_facecolor("white")
+    fig.text(0.05, 0.95, title, fontsize=18, weight="bold", ha="left", va="top")
 
-            if col == win_rate_col:
-                cell.set_text_props(weight="bold")
+    left_margin = 0.035
+    right_margin = 0.035
+    bottom_margin = 0.055
+    top_reserved = 0.11
+    available_width = 1.0 - left_margin - right_margin
+    available_height = 1.0 - top_reserved - bottom_margin
+    available_aspect = (figsize[0] * available_width) / (figsize[1] * available_height)
 
-            if column_name in return_columns:
-                numeric_value = _parse_percent_string(cell_value)
-                cell.set_facecolor(_heatmap_fill_color(numeric_value, max_abs_value))
-                if not np.isnan(numeric_value):
-                    cell.get_text().set_color("#202020")
+    if image_aspect >= available_aspect:
+        axes_width = available_width
+        axes_height = axes_width / image_aspect * (figsize[0] / figsize[1])
+    else:
+        axes_height = available_height
+        axes_width = axes_height * image_aspect * (figsize[1] / figsize[0])
 
-            if column_name == "Year":
-                cell.set_facecolor("#F5F5F5")
-                cell.set_text_props(weight="bold")
+    axes_left = left_margin + (available_width - axes_width) / 2
+    axes_bottom = bottom_margin + (available_height - axes_height) / 2
+
+    ax = fig.add_axes([axes_left, axes_bottom, axes_width, axes_height])
+    ax.imshow(image, aspect="auto")
+    ax.axis("off")
 
     _add_footer(fig, page_number)
     pdf.savefig(fig, bbox_inches="tight")
@@ -776,90 +720,58 @@ def _save_return_charts_and_table_section(
 
 def save_monthly_returns_heatmap_table(
     monthly_return_table: pd.DataFrame,
+    benchmark_monthly_return_table: pd.DataFrame,
+    monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
+    benchmark_annual_return_table: pd.DataFrame,
     output_path: str = f"{CHART_DIR}/monthly_returns_heatmap_table.png",
 ) -> None:
     """
-    Save the yearly monthly-return heatmap table as a standalone chart image.
+    Save the yearly fund/benchmark/excess monthly-return heatmap table as a standalone chart image.
     """
-    os.makedirs(CHART_DIR, exist_ok=True)
-    summary_table = _build_monthly_returns_summary_table(
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    summary_table = build_monthly_returns_heatmap_table(
         monthly_return_table=monthly_return_table,
+        benchmark_monthly_return_table=benchmark_monthly_return_table,
+        monthly_excess_return_table=monthly_excess_return_table,
         annual_return_table=annual_return_table,
+        benchmark_annual_return_table=benchmark_annual_return_table,
     )
 
-    fig, ax = plt.subplots(figsize=(16, 4.8))
+    fig, ax = plt.subplots(figsize=(17, 5.4))
     fig.patch.set_facecolor("white")
     ax.axis("off")
-    fig.text(0.05, 0.93, "Monthly Returns Heatmap Table", fontsize=16, weight="bold")
+    fig.suptitle(
+        "Monthly Fund, Benchmark, and Excess Return Heatmap Table",
+        fontsize=16,
+        fontweight="bold",
+        y=0.97,
+    )
 
     if summary_table.empty:
         ax.text(0.0, 0.85, "No monthly return table is available.", fontsize=10.5)
     else:
-        table = ax.table(
-            cellText=summary_table.values,
-            colLabels=summary_table.columns,
-            cellLoc="center",
-            colLoc="center",
-            loc="center",
+        draw_monthly_returns_heatmap_table(
+            ax=ax,
+            summary_table=summary_table,
+            bbox=(0.0, 0.0, 1.0, 0.84),
+            header_fontsize=8.2,
+            body_fontsize=7.8,
         )
-        table.auto_set_font_size(False)
-        table.set_fontsize(8.0)
-        table.scale(1, 1.4)
 
-        month_columns = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
-        annual_return_col = summary_table.columns.get_loc("Annual Return")
-        win_rate_col = summary_table.columns.get_loc("Win Rate")
-        return_columns = month_columns | {"Annual Return"}
-        heatmap_values = []
-
-        for _, row_data in summary_table.iterrows():
-            for column_name in summary_table.columns:
-                if column_name in return_columns:
-                    parsed_value = _parse_percent_string(row_data[column_name])
-                    if not np.isnan(parsed_value):
-                        heatmap_values.append(parsed_value)
-
-        max_abs_value = max((abs(value) for value in heatmap_values), default=0.0)
-
-        for (row, col), cell in table.get_celld().items():
-            if row == 0:
-                cell.set_text_props(weight="bold")
-                cell.set_facecolor("#E6E6E6")
-                continue
-
-            cell_value = summary_table.iloc[row - 1, col]
-            column_name = summary_table.columns[col]
-
-            if col == annual_return_col or col == win_rate_col or column_name == "Year":
-                cell.set_text_props(weight="bold")
-
-            if column_name in return_columns:
-                numeric_value = _parse_percent_string(cell_value)
-                cell.set_facecolor(_heatmap_fill_color(numeric_value, max_abs_value))
-                if not np.isnan(numeric_value):
-                    cell.get_text().set_color("#202020")
-
-            if column_name == "Year":
-                cell.set_facecolor("#F5F5F5")
-
-    plt.tight_layout()
+    fig.subplots_adjust(top=0.86, bottom=0.05)
     plt.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
-def build_pdf_report(analysis: dict, input_path: str, output_path: str) -> None:
+def build_pdf_report(analysis: dict, input_path: str, output_path: str, output_root: str = "output") -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    metric_table = _flatten_metric_categories(
-        analysis["metric_categories"],
-        percentage_metrics=analysis["percentage_metrics"],
-    )
+    chart_dir, report_dir = _resolve_output_dirs(output_root)
 
     chart_pages: List[Tuple[str, str]] = [
-        (f"{CHART_DIR}/nav_drawdown.png", "NAV and Drawdown"),
-        (f"{CHART_DIR}/rolling_metrics.png", "Rolling Risk Metrics"),
-        (f"{CHART_DIR}/drawdown_frequency.png", "Drawdown Frequency"),
+        (os.path.join(chart_dir, "nav_drawdown.png"), "NAV and Drawdown"),
+        (os.path.join(chart_dir, "rolling_metrics.png"), "Rolling Risk Metrics"),
+        (os.path.join(chart_dir, "drawdown_frequency.png"), "Drawdown Frequency"),
     ]
 
     with PdfPages(output_path) as pdf:
@@ -871,7 +783,28 @@ def build_pdf_report(analysis: dict, input_path: str, output_path: str) -> None:
         for section_title, paragraphs in commentary.items():
             page_number = _save_text_page(pdf, section_title, paragraphs, page_number)
 
-        page_number = _save_table_pages(pdf, metric_table, "Metrics Summary", page_number)
+        metrics_summary_pages = split_metric_categories_for_pages(
+            analysis["metric_categories"],
+            percentage_metrics=analysis["percentage_metrics"],
+            max_total_units_per_page=19.5,
+        )
+        for page_index, metric_categories_page in enumerate(metrics_summary_pages, start=1):
+            page_image_path = os.path.join(
+                chart_dir,
+                f"metrics_summary_table_page_{page_index}.png",
+            )
+            save_metrics_summary_table_image(
+                metric_categories=metric_categories_page,
+                output_path=page_image_path,
+                percentage_metrics=analysis["percentage_metrics"],
+            )
+            title = "Metrics Summary" if len(metrics_summary_pages) == 1 else f"Metrics Summary ({page_index}/{len(metrics_summary_pages)})"
+            page_number = _save_large_image_page(
+                pdf,
+                page_image_path,
+                title,
+                page_number,
+            )
         page_number = _save_text_page(
             pdf,
             "Risk Commentary",
@@ -881,10 +814,13 @@ def build_pdf_report(analysis: dict, input_path: str, output_path: str) -> None:
 
         page_number = _save_return_charts_and_table_section(
             pdf,
-            annual_image_path=f"{CHART_DIR}/annual_returns.png",
-            monthly_image_path=f"{CHART_DIR}/monthly_returns.png",
+            annual_image_path=os.path.join(chart_dir, "annual_returns.png"),
+            monthly_image_path=os.path.join(chart_dir, "monthly_returns.png"),
             monthly_return_table=analysis["monthly_return_table"],
+            benchmark_monthly_return_table=analysis["benchmark_monthly_return_table"],
+            monthly_excess_return_table=analysis["monthly_excess_return_table"],
             annual_return_table=analysis["annual_return_table"],
+            benchmark_annual_return_table=analysis["benchmark_annual_return_table"],
             page_number=page_number,
         )
 
@@ -903,22 +839,67 @@ def parse_args() -> argparse.Namespace:
         help=f"Input NAV file path. Supports CSV, XLSX, and XLS. Default: {DEFAULT_INPUT_PATH}",
     )
     parser.add_argument(
+        "--benchmark",
+        default=None,
+        help="Benchmark level file path. The second column must be a benchmark level series, not returns.",
+    )
+    parser.add_argument(
+        "--benchmark-name",
+        default=None,
+        help="Optional friendly benchmark name to display in charts, tables, commentary, and the PDF report.",
+    )
+    parser.add_argument(
         "--output",
         default=DEFAULT_OUTPUT_PATH,
         help=f"Output PDF path. Default: {DEFAULT_OUTPUT_PATH}",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="output",
+        help="Output root for charts and CSV artifacts. Default: output",
     )
 
     return parser.parse_args()
 
 
+def resolve_benchmark_path(benchmark_arg: str | None) -> str:
+    """
+    Resolve the benchmark file path from CLI input or standard data locations.
+    """
+    if benchmark_arg:
+        return benchmark_arg
+
+    for candidate in DEFAULT_BENCHMARK_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+
+    raise ValueError(
+        "Benchmark input is required for report generation. "
+        "Pass --benchmark or add data/benchmark.xlsx, data/benchmark.csv, or data/benchmark.xls."
+    )
+
+
 def main() -> None:
     args = parse_args()
-    analysis = run_full_analysis(args.input)
-    build_pdf_report(analysis, input_path=args.input, output_path=args.output)
+    benchmark_path = resolve_benchmark_path(args.benchmark)
+    analysis = run_full_analysis(
+        args.input,
+        benchmark_path=benchmark_path,
+        output_root=args.output_dir,
+        benchmark_name=args.benchmark_name,
+    )
+    build_pdf_report(
+        analysis,
+        input_path=args.input,
+        output_path=args.output,
+        output_root=args.output_dir,
+    )
 
     print(f"PDF report generated: {args.output}")
-    print(f"Metrics CSV generated: {REPORT_DIR}/metrics_summary_table.csv")
-    print(f"Charts generated under: {CHART_DIR}")
+    print(f"Benchmark file used: {benchmark_path}")
+    print(f"Benchmark name used: {analysis['benchmark_name']}")
+    print(f"Metrics CSV generated: {os.path.join(_resolve_output_dirs(args.output_dir)[1], 'metrics_summary_table.csv')}")
+    print(f"Charts generated under: {_resolve_output_dirs(args.output_dir)[0]}")
 
 
 if __name__ == "__main__":

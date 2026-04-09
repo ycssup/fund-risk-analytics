@@ -5,6 +5,7 @@ TRADING_DAYS = 252
 WEEKS_PER_YEAR = 52
 MONTHS_PER_YEAR = 12
 CALENDAR_DAYS = 365.25
+SUPPORTED_FREQUENCIES = {"daily", "weekly", "monthly"}
 
 
 def infer_data_frequency(df: pd.DataFrame, strict: bool = False) -> Tuple[str, float]:
@@ -43,6 +44,13 @@ def infer_data_frequency(df: pd.DataFrame, strict: bool = False) -> Tuple[str, f
         return "monthly", MONTHS_PER_YEAR
 
     return "custom", CALENDAR_DAYS / median_days
+
+
+def is_supported_frequency(frequency_label: str) -> bool:
+    """
+    Return True when the inferred frequency matches the supported major buckets.
+    """
+    return frequency_label in SUPPORTED_FREQUENCIES
 
 
 def infer_periods_per_year(df: pd.DataFrame) -> float:

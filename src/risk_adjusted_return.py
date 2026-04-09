@@ -1,13 +1,13 @@
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Dict, Optional
 
 from src.drawdown_analysis import max_drawdown
 from src.frequency import TRADING_DAYS, infer_periods_per_year
 from src.risk_metrics import annualized_return, annualized_volatility
 
 
-def _get_return_series(df: pd.DataFrame, return_col: str = "daily_return") -> pd.Series:
+def _get_return_series(df: pd.DataFrame, return_col: str = "fund_return") -> pd.Series:
     if return_col not in df.columns:
         raise KeyError(f"Missing return column: {return_col}")
 
@@ -23,7 +23,7 @@ def _periodic_rate(annual_rate: float, periods_per_year: float) -> float:
 
 def _aligned_fund_benchmark_returns(
     df: pd.DataFrame,
-    fund_return_col: str = "daily_return",
+    fund_return_col: str = "fund_return",
     benchmark_return_col: str = "benchmark_return",
 ) -> pd.DataFrame:
     if fund_return_col not in df.columns or benchmark_return_col not in df.columns:
@@ -44,13 +44,31 @@ def _beta_from_returns(aligned_returns: pd.DataFrame) -> float:
         return np.nan
 
     benchmark_variance = aligned_returns["benchmark_return"].var()
-    if benchmark_variance == 0 or np.isnan(benchmark_variance):
+    if np.isnan(benchmark_variance) or np.isclose(benchmark_variance, 0.0):
         return np.nan
 
     return float(
         aligned_returns["fund_return"].cov(aligned_returns["benchmark_return"])
         / benchmark_variance
     )
+
+
+def _benchmark_nav_frame(df: pd.DataFrame, benchmark_col: str = "benchmark") -> pd.DataFrame:
+    """
+    Build a NAV-like frame from benchmark levels for reuse in return calculations.
+    """
+    required_columns = {"date", benchmark_col}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        return pd.DataFrame(columns=["date", "nav"])
+
+    benchmark_df = df[["date", benchmark_col]].copy()
+    benchmark_df = benchmark_df.rename(columns={benchmark_col: "nav"})
+    benchmark_df["date"] = pd.to_datetime(benchmark_df["date"], errors="coerce")
+    benchmark_df["nav"] = pd.to_numeric(benchmark_df["nav"], errors="coerce")
+    benchmark_df = benchmark_df.dropna(subset=["date", "nav"]).sort_values("date")
+
+    return benchmark_df
 
 
 def sharpe_ratio(
@@ -75,7 +93,7 @@ def sharpe_ratio(
 def sortino_ratio(
     df: pd.DataFrame,
     target_return: float = 0.02,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> float:
     """
@@ -144,7 +162,7 @@ def treynor_ratio(
 def treynor_black_ratio(
     df: pd.DataFrame,
     risk_free_rate: float = 0.02,
-    fund_return_col: str = "daily_return",
+    fund_return_col: str = "fund_return",
     benchmark_return_col: str = "benchmark_return",
     periods_per_year: Optional[float] = None,
 ) -> float:
@@ -218,4 +236,80 @@ def risk_adjusted_return_metrics(
             benchmark_return_col=benchmark_return_col,
             periods_per_year=periods_per_year,
         ),
+    }
+
+
+def tracking_error(
+    df: pd.DataFrame,
+    fund_return_col: str = "fund_return",
+    benchmark_return_col: str = "benchmark_return",
+    periods_per_year: Optional[float] = None,
+) -> float:
+    """
+    Calculate annualized tracking error from aligned excess returns.
+    """
+    if periods_per_year is None:
+        periods_per_year = infer_periods_per_year(df)
+
+    aligned_returns = _aligned_fund_benchmark_returns(
+        df,
+        fund_return_col=fund_return_col,
+        benchmark_return_col=benchmark_return_col,
+    )
+    if len(aligned_returns) < 2:
+        return np.nan
+
+    excess_returns = aligned_returns["fund_return"] - aligned_returns["benchmark_return"]
+    realized_tracking_error = float(excess_returns.std() * np.sqrt(periods_per_year))
+    if np.isclose(realized_tracking_error, 0.0):
+        return 0.0
+
+    return realized_tracking_error
+
+
+def benchmark_comparison_metrics(
+    df: pd.DataFrame,
+    benchmark_col: str = "benchmark",
+    fund_return_col: str = "fund_return",
+    benchmark_return_col: str = "benchmark_return",
+    periods_per_year: Optional[float] = None,
+) -> Dict[str, float]:
+    """
+    Calculate benchmark-relative performance metrics from the aligned dataset.
+    """
+    if periods_per_year is None:
+        periods_per_year = infer_periods_per_year(df)
+
+    fund_annualized_return = annualized_return(df, periods_per_year=periods_per_year)
+    benchmark_df = _benchmark_nav_frame(df, benchmark_col=benchmark_col)
+    benchmark_annualized_return = annualized_return(
+        benchmark_df,
+        periods_per_year=periods_per_year,
+    )
+
+    benchmark_cumulative_return = np.nan
+    if len(benchmark_df) >= 2:
+        start_level = benchmark_df["nav"].iloc[0]
+        end_level = benchmark_df["nav"].iloc[-1]
+        if start_level > 0 and end_level > 0:
+            benchmark_cumulative_return = float(end_level / start_level - 1)
+
+    annualized_excess_return = fund_annualized_return - benchmark_annualized_return
+    realized_tracking_error = tracking_error(
+        df,
+        fund_return_col=fund_return_col,
+        benchmark_return_col=benchmark_return_col,
+        periods_per_year=periods_per_year,
+    )
+    if np.isnan(realized_tracking_error) or np.isclose(realized_tracking_error, 0.0):
+        information_ratio = np.nan
+    else:
+        information_ratio = float(annualized_excess_return / realized_tracking_error)
+
+    return {
+        "benchmark_return": benchmark_annualized_return,
+        "benchmark_cumulative_return": benchmark_cumulative_return,
+        "excess_return": annualized_excess_return,
+        "tracking_error": realized_tracking_error,
+        "information_ratio": information_ratio,
     }

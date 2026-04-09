@@ -1,4 +1,6 @@
-from typing import Dict
+from typing import Dict, Optional
+
+import pandas as pd
 
 
 # These mappings convert structured risk signals into plain-English phrases.
@@ -45,7 +47,23 @@ def _signal_text(signals: Dict[str, str], signal_name: str, default_text: str) -
     return SIGNAL_PHRASES.get(signal_name, {}).get(signal_value, default_text)
 
 
-def generate_risk_narrative(signals: dict) -> str:
+def _format_pct(value) -> str:
+    if pd.isna(value):
+        return "NaN"
+    return f"{value:.2%}"
+
+
+def _format_num(value) -> str:
+    if pd.isna(value):
+        return "NaN"
+    return f"{value:.4f}"
+
+
+def generate_risk_narrative(
+    signals: dict,
+    benchmark_metrics: Optional[Dict[str, float]] = None,
+    benchmark_name: str = "Benchmark",
+) -> str:
     """
     Build a professional deterministic risk commentary from the risk signals.
 
@@ -67,10 +85,33 @@ def generate_risk_narrative(signals: dict) -> str:
 
     overall_risk = signals.get("overall_risk", "Unknown")
     monitoring_flag = signals.get("monitoring_flag", "Normal")
+    benchmark_metrics = benchmark_metrics or {}
+    excess_return = benchmark_metrics.get("excess_return")
+    tracking_error = benchmark_metrics.get("tracking_error")
+    information_ratio = benchmark_metrics.get("information_ratio")
+
+    if pd.isna(excess_return):
+        benchmark_sentence = (
+            f"Benchmark-relative performance versus {benchmark_name} is not available from the current aligned sample."
+        )
+    else:
+        relative_direction = "outperformed" if excess_return >= 0 else "underperformed"
+        tracking_text = (
+            "with tracking error not available"
+            if pd.isna(tracking_error)
+            else f"with tracking error of {_format_pct(tracking_error)}"
+        )
+        benchmark_sentence = (
+            f"The fund {relative_direction} {benchmark_name}, delivering annualized excess return "
+            f"of {_format_pct(excess_return)} {tracking_text} and an information ratio of "
+            f"{_format_num(information_ratio)}. This benchmark-relative profile indicates "
+            f"{'effective active risk taking' if excess_return >= 0 and pd.notna(information_ratio) and information_ratio > 0 else 'that active risk has not yet translated into consistent excess return'}."
+        )
 
     sentences = [
         f"The fund exhibits {vol_text}, with {drawdown_text}.",
         f"The fund shows {sharpe_text}, while {trend_text}.",
+        benchmark_sentence,
         (
             f"Overall, the portfolio is assessed as {overall_risk} risk, "
             f"{driver_text}. "

@@ -4,7 +4,7 @@ from typing import Dict, Optional, Sequence
 from src.frequency import CALENDAR_DAYS, TRADING_DAYS, infer_periods_per_year
 
 DEFAULT_CONFIDENCE_LEVELS = (0.95, 0.99)
-DEFAULT_HOLDING_PERIOD_DAYS = (1, 10)
+DEFAULT_HOLDING_PERIODS = (1, 10)
 
 
 def _infer_periods_per_year(df: pd.DataFrame) -> float:
@@ -14,7 +14,7 @@ def _infer_periods_per_year(df: pd.DataFrame) -> float:
     return infer_periods_per_year(df)
 
 
-def _get_return_series(df: pd.DataFrame, return_col: str = "daily_return") -> pd.Series:
+def _get_return_series(df: pd.DataFrame, return_col: str = "fund_return") -> pd.Series:
     """
     Return a clean numeric return series.
     """
@@ -29,7 +29,7 @@ def _horizon_scale(
     periods_per_year: Optional[float] = None,
 ) -> float:
     """
-    Convert the return observation frequency to the requested trading-day horizon.
+    Convert the return observation frequency to the requested multi-period horizon.
     """
     if periods_per_year is None:
         periods_per_year = TRADING_DAYS
@@ -41,21 +41,93 @@ def _horizon_scale(
     return np.sqrt(horizon_periods)
 
 
+def _historical_var_quantile(confidence_level: float) -> float:
+    """
+    Map a confidence level to the lower-tail historical quantile.
+
+    Examples:
+    - 95% VaR -> 5th percentile
+    - 99% VaR -> 1st percentile
+    """
+    if not 0 < confidence_level < 1:
+        return np.nan
+
+    return 1.0 - confidence_level
+
+
+def _reported_loss_from_return(return_value: float) -> float:
+    """
+    Convert a return-style tail statistic into a positive loss number for reporting.
+
+    Clipping is applied only at the final reporting step. This avoids distorting the
+    underlying quantile or tail mean, while still preventing a negative "loss" figure
+    when the sample contains no downside observations.
+    """
+    if pd.isna(return_value):
+        return np.nan
+
+    return float(max(-float(return_value), 0.0))
+
+
+def _tail_risk_debug_snapshot(
+    returns: pd.Series,
+    confidence_levels: Sequence[float] = DEFAULT_CONFIDENCE_LEVELS,
+) -> Dict[str, float]:
+    """
+    Internal troubleshooting helper for historical tail-risk estimation.
+
+    This is intentionally side-effect free so callers can inspect or print it when
+    debugging without changing the normal analytics pipeline.
+    """
+    clean_returns = pd.to_numeric(returns, errors="coerce").dropna()
+    snapshot: Dict[str, float] = {"sample_size": int(len(clean_returns))}
+
+    for confidence_level in confidence_levels:
+        quantile_level = _historical_var_quantile(confidence_level)
+        label = _format_confidence_level(confidence_level)
+
+        if len(clean_returns) == 0 or pd.isna(quantile_level):
+            snapshot[f"q{label}_return_quantile"] = np.nan
+            snapshot[f"q{label}_tail_count"] = 0
+            continue
+
+        quantile_return = clean_returns.quantile(quantile_level)
+        tail_count = int((clean_returns <= quantile_return).sum())
+        snapshot[f"q{label}_return_quantile"] = float(quantile_return)
+        snapshot[f"q{label}_tail_count"] = tail_count
+
+    return snapshot
+
+
+def debug_tail_risk_snapshot(
+    df: pd.DataFrame,
+    return_col: str = "fund_return",
+    confidence_levels: Sequence[float] = DEFAULT_CONFIDENCE_LEVELS,
+) -> Dict[str, float]:
+    """
+    Optional public troubleshooting helper.
+
+    Returns:
+    - sample size
+    - q95 / q99 return quantiles
+    - number of observations in each tail
+    """
+    returns = _get_return_series(df, return_col=return_col)
+    return _tail_risk_debug_snapshot(returns, confidence_levels=confidence_levels)
+
+
 def _format_confidence_level(confidence_level: float) -> str:
     return f"{int(round(confidence_level * 100))}"
 
 
-def _format_horizon_label(holding_period_days: int) -> str:
+def _format_horizon_label(holding_periods: int) -> str:
     """
-    Format the reported horizon label for tail-risk metrics.
-
-    For this project, 1-day tail metrics are reported as scaled estimates
-    because they may be derived from non-daily return data.
+    Format the reported horizon label using frequency-neutral period terms.
     """
-    if holding_period_days == 1:
-        return "1d_scaled"
+    if holding_periods == 1:
+        return "period"
 
-    return f"{holding_period_days}d"
+    return f"{holding_periods}_period"
 
 
 def annualized_return(df: pd.DataFrame, periods_per_year: Optional[float] = None) -> float:
@@ -114,7 +186,7 @@ def value_at_risk(
     df: pd.DataFrame,
     confidence_level: float = 0.95,
     holding_period_days: int = 1,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> float:
     """
@@ -127,7 +199,8 @@ def value_at_risk(
     if periods_per_year is None:
         periods_per_year = _infer_periods_per_year(df)
 
-    quantile = returns.quantile(1 - confidence_level)
+    quantile_level = _historical_var_quantile(confidence_level)
+    quantile_return = returns.quantile(quantile_level)
     scale = _horizon_scale(
         holding_period_days=holding_period_days,
         periods_per_year=periods_per_year,
@@ -136,14 +209,18 @@ def value_at_risk(
     if np.isnan(scale):
         return np.nan
 
-    return float(max(-quantile, 0) * scale)
+    # Keep the existing square-root-of-time horizon scaling for multi-period reporting.
+    # With very small samples, 99% VaR can equal 95% VaR because both quantiles may map
+    # to the same extreme historical observation; this is a sample-size limitation, not
+    # something the implementation should artificially smooth away.
+    return _reported_loss_from_return(quantile_return) * scale
 
 
 def conditional_value_at_risk(
     df: pd.DataFrame,
     confidence_level: float = 0.95,
     holding_period_days: int = 1,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> float:
     """
@@ -156,8 +233,9 @@ def conditional_value_at_risk(
     if periods_per_year is None:
         periods_per_year = _infer_periods_per_year(df)
 
-    quantile = returns.quantile(1 - confidence_level)
-    tail_returns = returns[returns <= quantile]
+    quantile_level = _historical_var_quantile(confidence_level)
+    quantile_return = returns.quantile(quantile_level)
+    tail_returns = returns[returns <= quantile_return]
     if len(tail_returns) == 0:
         return np.nan
 
@@ -169,14 +247,17 @@ def conditional_value_at_risk(
     if np.isnan(scale):
         return np.nan
 
-    return float(max(-tail_returns.mean(), 0) * scale)
+    # CVaR can equal VaR when the tail contains only one observation. That is expected in
+    # sparse tails and should remain visible rather than being masked by extra smoothing.
+    tail_mean_return = tail_returns.mean()
+    return _reported_loss_from_return(tail_mean_return) * scale
 
 
 def expected_shortfall(
     df: pd.DataFrame,
     confidence_level: float = 0.95,
     holding_period_days: int = 1,
-    return_col: str = "daily_return",
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> float:
     """
@@ -194,8 +275,8 @@ def expected_shortfall(
 def var_metrics(
     df: pd.DataFrame,
     confidence_levels: Sequence[float] = DEFAULT_CONFIDENCE_LEVELS,
-    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIOD_DAYS,
-    return_col: str = "daily_return",
+    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIODS,
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> Dict[str, float]:
     """
@@ -217,8 +298,8 @@ def var_metrics(
 def cvar_es_metrics(
     df: pd.DataFrame,
     confidence_levels: Sequence[float] = DEFAULT_CONFIDENCE_LEVELS,
-    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIOD_DAYS,
-    return_col: str = "daily_return",
+    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIODS,
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> Dict[str, float]:
     """
@@ -242,8 +323,8 @@ def cvar_es_metrics(
 def tail_risk_metrics(
     df: pd.DataFrame,
     confidence_levels: Sequence[float] = DEFAULT_CONFIDENCE_LEVELS,
-    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIOD_DAYS,
-    return_col: str = "daily_return",
+    holding_period_days: Sequence[int] = DEFAULT_HOLDING_PERIODS,
+    return_col: str = "fund_return",
     periods_per_year: Optional[float] = None,
 ) -> Dict[str, float]:
     """

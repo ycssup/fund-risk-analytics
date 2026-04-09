@@ -37,7 +37,7 @@ def rolling_volatility(
     if ann_factor is None:
         ann_factor = np.sqrt(periods_per_year)
 
-    return df["daily_return"].rolling(window).std() * ann_factor
+    return df["fund_return"].rolling(window).std() * ann_factor
 
 
 def rolling_sharpe(
@@ -58,8 +58,8 @@ def rolling_sharpe(
     if ann_factor is None:
         ann_factor = np.sqrt(periods_per_year)
 
-    rolling_mean = df["daily_return"].rolling(window).mean() * periods_per_year
-    rolling_std = df["daily_return"].rolling(window).std() * ann_factor
+    rolling_mean = df["fund_return"].rolling(window).mean() * periods_per_year
+    rolling_std = df["fund_return"].rolling(window).std() * ann_factor
     rolling_std = rolling_std.replace(0, np.nan)
 
     return (rolling_mean - risk_free_rate) / rolling_std

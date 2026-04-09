@@ -298,7 +298,7 @@ def generate_risk_signals(
     """
     annualized_volatility = _get_metric(metric_categories, "Risk Metrics", "annualized_volatility")
     max_drawdown = _get_metric(metric_categories, "Risk Metrics", "max_drawdown")
-    sharpe_ratio = _get_metric(metric_categories, "Risk-Adjusted Return Metrics", "sharpe_ratio")
+    sharpe_ratio = _get_metric(metric_categories, "Risk-Adjusted Return", "sharpe_ratio")
     tail_metrics = metric_categories.get("Tail Risk Metrics", {})
 
     vol_signal_value = volatility_signal(annualized_volatility)
