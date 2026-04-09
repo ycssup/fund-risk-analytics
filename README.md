@@ -1,4 +1,4 @@
-# 📊 Fund NAV-Based Risk Analytics (In Progress)
+# 📊 Fund NAV-Based Risk Analytics
 
 A Python project for analyzing fund performance and risk based on NAV (Net Asset Value) time series.
 
@@ -83,10 +83,35 @@ Rolling metrics use frequency-aware windows:
 - Rolling volatility and rolling Sharpe chart
 - Monthly return bar chart
 - Annual return bar chart
+- Return analysis report page combining:
+  - annual return chart
+  - monthly return chart
+  - yearly monthly-return heatmap table
 - Drawdown frequency chart
 - Metrics summary CSV report
 - PDF fund risk assessment report
 - Natural-language commentary and conclusion pages in the PDF report
+
+### 7. Absolute Risk Interpretation Layer
+
+- Rule-based absolute risk signals
+- `vol_signal`: low / medium / high
+- `drawdown_signal`: shallow / moderate / deep
+- `sharpe_signal`: strong / average / weak
+- `tail_signal`: low / elevated / high
+- `trend_signal`: improving / deteriorating / stable
+- `overall_risk`: Low / Moderate / High
+- `key_risk_driver`: Drawdown / Volatility / Tail Risk / Multiple Factors / Balanced
+- `monitoring_flag`: Normal / Watch / Escalate
+
+### 8. Narrative Layer
+
+- Deterministic risk commentary generated from the signal engine
+- Professional report paragraph summarizing:
+  - volatility and drawdown
+  - risk-adjusted performance
+  - trend condition
+  - overall risk conclusion
 
 ---
 
@@ -119,6 +144,8 @@ Rolling metrics use frequency-aware windows:
     ├── src/
     │   ├── data_loader.py
     │   ├── frequency.py
+    │   ├── signal_engine.py
+    │   ├── narrative_engine.py
     │   ├── return_metrics.py
     │   ├── risk_metrics.py
     │   ├── risk_adjusted_return.py
@@ -174,6 +201,8 @@ Annualization uses the detected frequency. For example, weekly data uses `52`, n
 
 Tail risk metrics use historical simulation. Multi-day VaR and CVaR/ES are scaled from the detected observation frequency to the requested holding period.
 
+For non-daily data, short-horizon tail-risk labels such as `1d_scaled` are reported explicitly as scaled estimates rather than directly observed daily losses.
+
 ### Step 5: Drawdown Analysis
 
 Drawdown:
@@ -187,6 +216,17 @@ Maximum drawdown recovery days are measured from the maximum drawdown trough dat
 ### Step 6: Visualization
 
 All charts and summary tables are generated from `src/visualization.py`.
+
+### Step 7: Risk Signals and Narrative
+
+The workflow then converts raw metrics into qualitative absolute risk signals and a deterministic narrative:
+
+- raw metrics -> single signals -> overall judgment -> narrative
+
+This layer is implemented in:
+
+- `src/signal_engine.py`
+- `src/narrative_engine.py`
 
 ---
 
@@ -223,13 +263,13 @@ Detected data profile:
 
 ### Tail Risk Metrics
 
-- VaR 95% 1-day: **2.65%**
+- VaR 95% 1-day scaled: **2.65%**
 - VaR 95% 10-day: **8.37%**
-- VaR 99% 1-day: **2.65%**
+- VaR 99% 1-day scaled: **2.65%**
 - VaR 99% 10-day: **8.37%**
-- CVaR/ES 95% 1-day: **2.65%**
+- CVaR/ES 95% 1-day scaled: **2.65%**
 - CVaR/ES 95% 10-day: **8.37%**
-- CVaR/ES 99% 1-day: **2.65%**
+- CVaR/ES 99% 1-day scaled: **2.65%**
 - CVaR/ES 99% 10-day: **8.37%**
 
 ### Risk-Adjusted Return Metrics
@@ -241,6 +281,21 @@ Detected data profile:
 - Treynor-Black Ratio: **NaN**
 
 Treynor metrics are `NaN` because the current input file does not include `benchmark_return`.
+
+### Risk Signals
+
+- Vol Signal: **high**
+- Drawdown Signal: **deep**
+- Sharpe Signal: **average**
+- Tail Signal: **low**
+- Trend Signal: **stable**
+- Overall Risk: **High**
+- Key Risk Driver: **Drawdown**
+- Monitoring Flag: **Escalate**
+
+### Risk Narrative
+
+> The fund exhibits elevated volatility, with significant drawdown pressure. The fund shows moderate risk-adjusted performance, while risk conditions remain stable. Overall, the portfolio is assessed as High risk, primarily driven by drawdown pressure. Monitoring status: Escalate.
 
 ---
 
@@ -266,6 +321,15 @@ Treynor metrics are `NaN` because the current input file does not include `bench
 
 ![Annual Returns](output/charts/annual_returns.png)
 
+### Return Analysis Page
+
+The PDF report includes a combined **Return Analysis** page:
+
+- upper half: annual return chart + monthly return chart
+- lower half: yearly monthly-return heatmap table
+- positive returns shown in red
+- negative returns shown in green
+
 ### Drawdown Frequency
 
 ![Drawdown Frequency](output/charts/drawdown_frequency.png)
@@ -282,7 +346,15 @@ The PDF report is exported as:
 output/reports/fund_risk_report.pdf
 ```
 
-The PDF report includes a cover page, automated commentary pages, metrics tables, annual return tables, charts, and a final conclusion/risk notes page.
+The PDF report includes:
+
+- cover page
+- automated commentary pages
+- metrics summary table
+- risk commentary page
+- combined return analysis page
+- charts
+- final conclusion / risk notes page
 
 ---
 
@@ -308,7 +380,9 @@ The script will:
 4. Calculate rolling metrics
 5. Calculate risk and risk-adjusted return metrics
 6. Calculate drawdown metrics
-7. Generate charts and reports
+7. Generate absolute risk signals
+8. Generate deterministic risk narrative
+9. Generate charts and reports
 
 ### 3. Generate PDF report
 
