@@ -201,7 +201,7 @@ def plot_monthly_returns(
         return
 
     data = monthly_return_table.copy()
-    colors = np.where(data["monthly_return"] >= 0, "#2ca02c", "#d62728")
+    colors = np.where(data["monthly_return"] >= 0, "#C62828", "#2E7D32")
 
     fig, ax = plt.subplots(figsize=(14, 6))
     ax.bar(data["month"], data["monthly_return"], color=colors)
@@ -231,7 +231,7 @@ def plot_annual_returns(
 
     data = annual_return_table.copy()
     data["year"] = data["year"].astype(str)
-    colors = np.where(data["annual_return"] >= 0, "#2ca02c", "#d62728")
+    colors = np.where(data["annual_return"] >= 0, "#C62828", "#2E7D32")
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.bar(data["year"], data["annual_return"], color=colors)

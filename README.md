@@ -85,6 +85,8 @@ Rolling metrics use frequency-aware windows:
 - Annual return bar chart
 - Drawdown frequency chart
 - Metrics summary CSV report
+- PDF fund risk assessment report
+- Natural-language commentary and conclusion pages in the PDF report
 
 ---
 
@@ -107,10 +109,12 @@ Rolling metrics use frequency-aware windows:
     │   │   ├── annual_returns.png
     │   │   └── drawdown_frequency.png
     │   └── reports/
-    │       └── metrics_summary_table.csv
+    │       ├── metrics_summary_table.csv
+    │       └── fund_risk_report.pdf
     │
     ├── scripts/
-    │   └── run_analysis.py
+    │   ├── run_analysis.py
+    │   └── generate_report.py
     │
     ├── src/
     │   ├── data_loader.py
@@ -272,6 +276,14 @@ The metrics summary is also exported as:
 output/reports/metrics_summary_table.csv
 ```
 
+The PDF report is exported as:
+
+```text
+output/reports/fund_risk_report.pdf
+```
+
+The PDF report includes a cover page, automated commentary pages, metrics tables, annual return tables, charts, and a final conclusion/risk notes page.
+
 ---
 
 ## ⚙️ How to Run
@@ -298,9 +310,29 @@ The script will:
 6. Calculate drawdown metrics
 7. Generate charts and reports
 
+### 3. Generate PDF report
+
+```bash
+python scripts/generate_report.py
+```
+
+The default input file is:
+
+```text
+data/sample_nav_data.xlsx
+```
+
+You can also specify a CSV, XLSX, or XLS file:
+
+```bash
+python scripts/generate_report.py --input data/sample_nav_data.xlsx --output output/reports/fund_risk_report.pdf
+```
+
 ---
 
 ## 📂 Input Data Format
+
+The analysis scripts support CSV, XLSX, and XLS files. XLSX files use `openpyxl`; XLS files require `xlrd`.
 
 Minimum required format:
 
@@ -328,6 +360,8 @@ date,nav,benchmark_return
 - pandas
 - numpy
 - matplotlib
+- openpyxl
+- xlrd
 
 ---
 

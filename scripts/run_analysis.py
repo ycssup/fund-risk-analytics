@@ -16,6 +16,8 @@ from src.risk_metrics import annualized_return, annualized_volatility, tail_risk
 from src.risk_adjusted_return import risk_adjusted_return_metrics
 from src.drawdown_analysis import calculate_drawdown, drawdown_frequency_summary, max_drawdown_details
 from src.rolling_metrics import add_rolling_metrics
+from src.signal_engine import generate_risk_signals
+from src.narrative_engine import generate_risk_narrative
 from src.visualization import generate_analysis_visualizations
 
 
@@ -41,7 +43,7 @@ def format_return_table(df: pd.DataFrame, return_col: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    file_path = "data/nav_sanitized_low_corr.xlsx"
+    file_path = "data/sample_nav_data.xlsx"
 
     # Step 1: load NAV data
     df = load_nav_data(file_path)
@@ -108,6 +110,13 @@ if __name__ == "__main__":
         "Tail Risk Metrics": tail_metrics,
         "Risk-Adjusted Return Metrics": risk_adjusted_metrics,
     }
+    risk_signals = generate_risk_signals(metric_categories=metric_categories, df=df)
+    metric_categories["Risk Signals"] = risk_signals
+    risk_narrative = generate_risk_narrative(risk_signals)
+    metric_categories["Risk Narrative"] = {
+        "risk_narrative": risk_narrative
+    }
+
     metrics_summary_table = generate_analysis_visualizations(
         df=df,
         metric_categories=metric_categories,
@@ -160,6 +169,11 @@ if __name__ == "__main__":
             print(f"{metric_name}: NaN")
         else:
             print(f"{metric_name}: {metric_value:.4f}")
+    print("\n=== Risk Signals ===")
+    for signal_name, signal_value in risk_signals.items():
+        print(f"{signal_name}: {signal_value}")
+    print("\n=== Risk Narrative ===")
+    print(risk_narrative)
     print("\n=== Drawdown Frequency ===")
     for frequency_name, frequency_table in drawdown_frequencies.items():
         print(f"\n{frequency_name.title()}")

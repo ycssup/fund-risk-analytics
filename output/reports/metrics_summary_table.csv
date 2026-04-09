@@ -1,6 +1,11 @@
 category,metric,value
+Data Profile,input_file,data/sample_nav_data.xlsx
+Data Profile,start_date,2022-11-11
+Data Profile,end_date,2026-01-30
+Data Profile,observations,166.0000
 Data Profile,data_frequency,weekly
 Data Profile,annualization_factor,52
+Data Profile,rolling_windows,"12, 26, 52"
 Return Metrics,inception_annualized_return,20.98%
 Return Metrics,inception_return,84.65%
 Return Metrics,year_to_date_return,-5.36%
@@ -16,16 +21,25 @@ Risk Metrics,annualized_volatility,31.11%
 Risk Metrics,max_drawdown,-41.73%
 Risk Metrics,max_drawdown_date,2024-10-18
 Risk Metrics,max_drawdown_recovery_days,NaN
-Tail Risk Metrics,var_95_1d,2.65%
+Tail Risk Metrics,var_95_1d_scaled,2.65%
 Tail Risk Metrics,var_95_10d,8.37%
-Tail Risk Metrics,var_99_1d,2.65%
+Tail Risk Metrics,var_99_1d_scaled,2.65%
 Tail Risk Metrics,var_99_10d,8.37%
-Tail Risk Metrics,cvar_es_95_1d,2.65%
+Tail Risk Metrics,cvar_es_95_1d_scaled,2.65%
 Tail Risk Metrics,cvar_es_95_10d,8.37%
-Tail Risk Metrics,cvar_es_99_1d,2.65%
+Tail Risk Metrics,cvar_es_99_1d_scaled,2.65%
 Tail Risk Metrics,cvar_es_99_10d,8.37%
 Risk-Adjusted Return Metrics,sharpe_ratio,0.6102
 Risk-Adjusted Return Metrics,sortino_ratio,1.0310
 Risk-Adjusted Return Metrics,calmar_ratio,0.5029
 Risk-Adjusted Return Metrics,treynor_ratio,NaN
 Risk-Adjusted Return Metrics,treynor_black_ratio,NaN
+Risk Signals,vol_signal,high
+Risk Signals,drawdown_signal,deep
+Risk Signals,sharpe_signal,average
+Risk Signals,tail_signal,low
+Risk Signals,trend_signal,stable
+Risk Signals,overall_risk,High
+Risk Signals,key_risk_driver,Drawdown
+Risk Signals,monitoring_flag,Escalate
+Risk Narrative,risk_narrative,"The fund exhibits elevated volatility, with significant drawdown pressure. The fund shows moderate risk-adjusted performance, while risk conditions remain stable. Overall, the portfolio is assessed as High risk, primarily driven by drawdown pressure. Monitoring status: Escalate."

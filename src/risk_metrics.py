@@ -45,6 +45,19 @@ def _format_confidence_level(confidence_level: float) -> str:
     return f"{int(round(confidence_level * 100))}"
 
 
+def _format_horizon_label(holding_period_days: int) -> str:
+    """
+    Format the reported horizon label for tail-risk metrics.
+
+    For this project, 1-day tail metrics are reported as scaled estimates
+    because they may be derived from non-daily return data.
+    """
+    if holding_period_days == 1:
+        return "1d_scaled"
+
+    return f"{holding_period_days}d"
+
+
 def annualized_return(df: pd.DataFrame, periods_per_year: Optional[float] = None) -> float:
     """
     Calculate annualized return using CAGR from NAV and actual date range.
@@ -189,7 +202,7 @@ def var_metrics(
     Calculate VaR metrics for multiple confidence levels and horizons.
     """
     return {
-        f"var_{_format_confidence_level(confidence_level)}_{horizon}d": value_at_risk(
+        f"var_{_format_confidence_level(confidence_level)}_{_format_horizon_label(horizon)}": value_at_risk(
             df=df,
             confidence_level=confidence_level,
             holding_period_days=horizon,
@@ -212,7 +225,7 @@ def cvar_es_metrics(
     Calculate CVaR / Expected Shortfall metrics for multiple confidence levels and horizons.
     """
     return {
-        f"cvar_es_{_format_confidence_level(confidence_level)}_{horizon}d": (
+        f"cvar_es_{_format_confidence_level(confidence_level)}_{_format_horizon_label(horizon)}": (
             conditional_value_at_risk(
                 df=df,
                 confidence_level=confidence_level,
