@@ -1,4 +1,4 @@
-# Fund Risk Analytics & Relative Performance Monitoring System
+# Fund Risk Analytics Pipeline
 
 Institutional-grade NAV analytics pipeline for benchmark-relative risk and performance monitoring, with automated visualization and PDF reporting.
 
