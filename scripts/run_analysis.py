@@ -44,7 +44,9 @@ def format_return_table(df: pd.DataFrame, return_col: str) -> pd.DataFrame:
     Format a return table for readable console output.
     """
     display_table = df.copy()
-    display_table[return_col] = display_table[return_col].map(format_percentage)
+    for column in display_table.columns:
+        if "return" in column:
+            display_table[column] = display_table[column].map(format_percentage)
     return display_table
 
 
@@ -151,11 +153,28 @@ def main() -> None:
         display_df["date"] = pd.to_datetime(display_df["date"]).dt.strftime("%Y-%m-%d")
 
     preview_numeric_cols = [
-        col for col in ["nav", "benchmark", "fund_return", "benchmark_return", "excess_return", "cumulative_return"]
+        col
+        for col in [
+            "nav",
+            "benchmark",
+            "fund_return",
+            "benchmark_return",
+            "period_excess_return",
+            "cumulative_return",
+            "benchmark_cumulative_return",
+            "cumulative_excess_return",
+        ]
         if col in display_df.columns
     ]
     display_df[preview_numeric_cols] = display_df[preview_numeric_cols].round(6)
-    for return_col in ["fund_return", "benchmark_return", "excess_return", "cumulative_return"]:
+    for return_col in [
+        "fund_return",
+        "benchmark_return",
+        "period_excess_return",
+        "cumulative_return",
+        "benchmark_cumulative_return",
+        "cumulative_excess_return",
+    ]:
         if return_col in display_df.columns:
             display_df[return_col] = df[return_col].map(format_percentage)
     print(display_df.head(12).to_string(index=False))
@@ -196,7 +215,9 @@ def main() -> None:
     print(f"\n=== Monthly Excess Returns vs {benchmark_name} ===")
     print(
         format_return_table(
-            analysis["monthly_excess_return_table"][["month", "monthly_excess_return"]].copy(),
+            analysis["monthly_excess_return_table"][
+                ["month", "fund_monthly_return", "benchmark_monthly_return", "monthly_excess_return"]
+            ].copy(),
             "monthly_excess_return",
         ).to_string(index=False)
     )
@@ -207,6 +228,15 @@ def main() -> None:
         format_return_table(
             analysis["benchmark_annual_return_table"],
             "benchmark_annual_return",
+        ).to_string(index=False)
+    )
+    print(f"\n=== Annual Excess Returns vs {benchmark_name} ===")
+    print(
+        format_return_table(
+            analysis["annual_excess_return_table"][
+                ["year", "fund_annual_return", "benchmark_annual_return", "annual_excess_return"]
+            ].copy(),
+            "annual_excess_return",
         ).to_string(index=False)
     )
 

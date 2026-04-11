@@ -168,8 +168,9 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
     calmar = adj.get("calmar_ratio", np.nan)
     treynor = adj.get("treynor_ratio", np.nan)
     treynor_black = adj.get("treynor_black_ratio", np.nan)
-    benchmark_return = benchmark.get("benchmark_return", np.nan)
-    excess_return = benchmark.get("excess_return", np.nan)
+    benchmark_return = benchmark.get("benchmark_annualized_return", np.nan)
+    annualized_excess_return = benchmark.get("annualized_excess_return", np.nan)
+    cumulative_excess_return = benchmark.get("cumulative_excess_return", np.nan)
     tracking_error = benchmark.get("tracking_error", np.nan)
     information_ratio = benchmark.get("information_ratio", np.nan)
     df = analysis.get("df", pd.DataFrame())
@@ -200,14 +201,14 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
         and np.isclose(cvar_95, cvar_99, rtol=1e-6, atol=1e-6)
     )
 
-    if pd.isna(excess_return):
+    if pd.isna(annualized_excess_return):
         benchmark_summary_sentence = (
             f"{benchmark_name} delivered an annualized return of {_fmt_pct(benchmark_return)} over the aligned sample, "
             "while annualized excess return is not available."
         )
     else:
-        benchmark_direction = "outperformed" if excess_return >= 0 else "underperformed"
-        benchmark_gap = _fmt_pct(abs(excess_return))
+        benchmark_direction = "outperformed" if annualized_excess_return >= 0 else "underperformed"
+        benchmark_gap = _fmt_pct(abs(annualized_excess_return))
         benchmark_summary_sentence = (
             f"{benchmark_name} delivered an annualized return of {_fmt_pct(benchmark_return)} over the aligned sample, "
             f"and the fund {benchmark_direction} {benchmark_name} by {benchmark_gap} on an annualized basis."
@@ -306,6 +307,11 @@ def generate_report_commentary(analysis: dict) -> Dict[str, List[str]]:
         "Benchmark Relative Commentary": [
             (benchmark_summary_sentence),
             (
+                "Monthly Excess Return measures period-by-period outperformance versus the benchmark, "
+                "while Cumulative Excess Return is defined as cumulative fund return minus cumulative benchmark return."
+            ),
+            (
+                f"Cumulative excess return over the aligned sample is {_fmt_pct(cumulative_excess_return)}. "
                 f"Tracking error is {_fmt_pct(tracking_error)}, and the information ratio is {_fmt_num(information_ratio)}. "
                 f"These measures summarize both the magnitude and efficiency of active return relative to {benchmark_name}."
             ),
@@ -421,6 +427,7 @@ def run_full_analysis(
         monthly_excess_return_table=analysis["monthly_excess_return_table"],
         annual_return_table=analysis["annual_return_table"],
         benchmark_annual_return_table=analysis["benchmark_annual_return_table"],
+        annual_excess_return_table=analysis["annual_excess_return_table"],
         output_path=os.path.join(_resolve_output_dirs(output_root)[0], "monthly_returns_heatmap_table.png"),
     )
     return analysis
@@ -450,8 +457,9 @@ def _save_cover_page(pdf: PdfPages, analysis: dict, input_path: str, page_number
         ("Rolling Windows", profile["rolling_windows"]),
         ("Inception Annualized Return", _format_metric_value(return_metrics["inception_annualized_return"], "inception_annualized_return", percentage_metrics)),
         ("Inception Return", _format_metric_value(return_metrics["inception_return"], "inception_return", percentage_metrics)),
-        (f"{benchmark_name} Return", _format_metric_value(benchmark_metrics.get("benchmark_return", np.nan), "benchmark_return", percentage_metrics)),
-        (f"Excess Return vs {benchmark_name}", _format_metric_value(benchmark_metrics.get("excess_return", np.nan), "excess_return", percentage_metrics)),
+        (f"{benchmark_name} Annualized Return", _format_metric_value(benchmark_metrics.get("benchmark_annualized_return", np.nan), "benchmark_annualized_return", percentage_metrics)),
+        ("Annualized Excess Return", _format_metric_value(benchmark_metrics.get("annualized_excess_return", np.nan), "annualized_excess_return", percentage_metrics)),
+        ("Cumulative Excess Return", _format_metric_value(benchmark_metrics.get("cumulative_excess_return", np.nan), "cumulative_excess_return", percentage_metrics)),
         ("Annualized Volatility", _format_metric_value(risk_metrics["annualized_volatility"], "annualized_volatility", percentage_metrics)),
         ("Maximum Drawdown", _format_metric_value(risk_metrics["max_drawdown"], "max_drawdown", percentage_metrics)),
         ("Maximum Drawdown Date", _format_metric_value(risk_metrics["max_drawdown_date"], "max_drawdown_date", percentage_metrics)),
@@ -613,6 +621,7 @@ def _save_return_charts_and_table_section(
     monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
     benchmark_annual_return_table: pd.DataFrame,
+    annual_excess_return_table: pd.DataFrame,
     page_number: int,
 ) -> int:
     """
@@ -626,11 +635,19 @@ def _save_return_charts_and_table_section(
         monthly_excess_return_table=monthly_excess_return_table,
         annual_return_table=annual_return_table,
         benchmark_annual_return_table=benchmark_annual_return_table,
+        annual_excess_return_table=annual_excess_return_table,
     )
 
     fig = plt.figure(figsize=(11, 8.5))
     fig.patch.set_facecolor("white")
     fig.text(0.06, 0.95, "Return Analysis", fontsize=18, weight="bold")
+    fig.text(
+        0.06,
+        0.92,
+        "Monthly excess return = monthly fund return minus monthly benchmark return. "
+        "Cumulative excess return is shown separately on the NAV chart as cumulative fund minus cumulative benchmark.",
+        fontsize=9,
+    )
 
     if os.path.exists(annual_image_path):
         annual_image = plt.imread(annual_image_path)
@@ -724,6 +741,7 @@ def save_monthly_returns_heatmap_table(
     monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
     benchmark_annual_return_table: pd.DataFrame,
+    annual_excess_return_table: pd.DataFrame,
     output_path: str = f"{CHART_DIR}/monthly_returns_heatmap_table.png",
 ) -> None:
     """
@@ -736,13 +754,14 @@ def save_monthly_returns_heatmap_table(
         monthly_excess_return_table=monthly_excess_return_table,
         annual_return_table=annual_return_table,
         benchmark_annual_return_table=benchmark_annual_return_table,
+        annual_excess_return_table=annual_excess_return_table,
     )
 
     fig, ax = plt.subplots(figsize=(17, 5.4))
     fig.patch.set_facecolor("white")
     ax.axis("off")
     fig.suptitle(
-        "Monthly Fund, Benchmark, and Excess Return Heatmap Table",
+        "Monthly Fund, Benchmark, and Monthly Excess Return Heatmap Table",
         fontsize=16,
         fontweight="bold",
         y=0.97,
@@ -769,7 +788,7 @@ def build_pdf_report(analysis: dict, input_path: str, output_path: str, output_r
     chart_dir, report_dir = _resolve_output_dirs(output_root)
 
     chart_pages: List[Tuple[str, str]] = [
-        (os.path.join(chart_dir, "nav_drawdown.png"), "NAV and Drawdown"),
+        (os.path.join(chart_dir, "nav_drawdown.png"), "Fund, Benchmark, Cumulative Excess Return, and Drawdown"),
         (os.path.join(chart_dir, "rolling_metrics.png"), "Rolling Risk Metrics"),
         (os.path.join(chart_dir, "drawdown_frequency.png"), "Drawdown Frequency"),
     ]
@@ -821,6 +840,7 @@ def build_pdf_report(analysis: dict, input_path: str, output_path: str, output_r
             monthly_excess_return_table=analysis["monthly_excess_return_table"],
             annual_return_table=analysis["annual_return_table"],
             benchmark_annual_return_table=analysis["benchmark_annual_return_table"],
+            annual_excess_return_table=analysis["annual_excess_return_table"],
             page_number=page_number,
         )
 

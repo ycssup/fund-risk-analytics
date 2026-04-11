@@ -47,7 +47,7 @@ def calculate_daily_returns(df: pd.DataFrame) -> pd.DataFrame:
     Legacy alias for calculate_periodic_returns.
 
     The project uses frequency-neutral return columns such as fund_return,
-    benchmark_return, and excess_return in all downstream outputs.
+    benchmark_return, and period_excess_return in all downstream outputs.
     """
     return calculate_periodic_returns(df, return_col="fund_return")
 

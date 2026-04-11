@@ -86,26 +86,33 @@ def generate_risk_narrative(
     overall_risk = signals.get("overall_risk", "Unknown")
     monitoring_flag = signals.get("monitoring_flag", "Normal")
     benchmark_metrics = benchmark_metrics or {}
-    excess_return = benchmark_metrics.get("excess_return")
+    annualized_excess_return = benchmark_metrics.get("annualized_excess_return")
     tracking_error = benchmark_metrics.get("tracking_error")
     information_ratio = benchmark_metrics.get("information_ratio")
+    cumulative_excess_return = benchmark_metrics.get("cumulative_excess_return")
 
-    if pd.isna(excess_return):
+    if pd.isna(annualized_excess_return):
         benchmark_sentence = (
             f"Benchmark-relative performance versus {benchmark_name} is not available from the current aligned sample."
         )
     else:
-        relative_direction = "outperformed" if excess_return >= 0 else "underperformed"
+        relative_direction = "outperformed" if annualized_excess_return >= 0 else "underperformed"
         tracking_text = (
             "with tracking error not available"
             if pd.isna(tracking_error)
             else f"with tracking error of {_format_pct(tracking_error)}"
         )
+        cumulative_text = (
+            "Cumulative excess return is not available."
+            if pd.isna(cumulative_excess_return)
+            else f"Cumulative excess return over the aligned sample is {_format_pct(cumulative_excess_return)}."
+        )
         benchmark_sentence = (
             f"The fund {relative_direction} {benchmark_name}, delivering annualized excess return "
-            f"of {_format_pct(excess_return)} {tracking_text} and an information ratio of "
+            f"of {_format_pct(annualized_excess_return)} {tracking_text} and an information ratio of "
             f"{_format_num(information_ratio)}. This benchmark-relative profile indicates "
-            f"{'effective active risk taking' if excess_return >= 0 and pd.notna(information_ratio) and information_ratio > 0 else 'that active risk has not yet translated into consistent excess return'}."
+            f"{'effective active risk taking' if annualized_excess_return >= 0 and pd.notna(information_ratio) and information_ratio > 0 else 'that active risk has not yet translated into consistent excess return'}. "
+            f"{cumulative_text}"
         )
 
     sentences = [

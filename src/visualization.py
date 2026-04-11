@@ -234,9 +234,10 @@ def build_monthly_returns_heatmap_table(
     monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
     benchmark_annual_return_table: pd.DataFrame,
+    annual_excess_return_table: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Build a three-row-per-year heatmap table with fund, benchmark, and excess monthly returns.
+    Build a three-row-per-year heatmap table with explicit monthly return definitions.
     """
     columns = [
         "Year", "Row Type", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -287,38 +288,31 @@ def build_monthly_returns_heatmap_table(
         .apply(lambda values: (values > 0).mean() if len(values) else np.nan)
         .rename("Win Rate")
     )
-    excess_annual = (
-        annual_data["Annual Return"].rename("fund_annual_return").to_frame()
-        .join(benchmark_annual_data["Annual Return"].rename("benchmark_annual_return"), how="outer")
-        .assign(**{"Annual Return": lambda x: x["fund_annual_return"] - x["benchmark_annual_return"]})["Annual Return"]
-        .rename("Annual Return")
+    annual_excess_data = annual_excess_return_table.copy().rename(
+        columns={"year": "Year", "annual_excess_return": "Annual Return"}
     )
+    annual_excess_data["Year"] = annual_excess_data["Year"].astype(int)
+    annual_excess_data = annual_excess_data.set_index("Year")
     excess_win_rate = (
         monthly_excess_return_table.assign(month_period=pd.PeriodIndex(monthly_excess_return_table["month"], freq="M"))
         .assign(Year=lambda x: x["month_period"].dt.year)
         .groupby("Year")
-        .apply(
-            lambda group: (
-                (group.dropna(subset=["monthly_return", "benchmark_monthly_return"])["monthly_return"]
-                 > group.dropna(subset=["monthly_return", "benchmark_monthly_return"])["benchmark_monthly_return"]).mean()
-                if len(group.dropna(subset=["monthly_return", "benchmark_monthly_return"]))
-                else np.nan
-            )
-        )
+        ["monthly_excess_return"]
+        .apply(lambda values: (values > 0).mean() if len(values.dropna()) else np.nan)
         .rename("Win Rate")
     )
 
     all_years = sorted(set(fund_pivot.index) | set(benchmark_pivot.index) | set(excess_pivot.index))
     rows = []
     for year in all_years:
-        fund_row = {"Year": str(year), "Row Type": "Fund Return"}
+        fund_row = {"Year": str(year), "Row Type": "Fund Monthly Return"}
         for month_name in ordered_months:
             fund_row[month_name] = fund_pivot.loc[year, month_name] if year in fund_pivot.index else np.nan
         fund_row["Annual Return"] = annual_data.loc[year, "Annual Return"] if year in annual_data.index else np.nan
         fund_row["Win Rate"] = fund_win_rate.loc[year] if year in fund_win_rate.index else np.nan
         rows.append(fund_row)
 
-        benchmark_row = {"Year": "", "Row Type": "Benchmark Return"}
+        benchmark_row = {"Year": "", "Row Type": "Benchmark Monthly Return"}
         for month_name in ordered_months:
             benchmark_row[month_name] = benchmark_pivot.loc[year, month_name] if year in benchmark_pivot.index else np.nan
         benchmark_row["Annual Return"] = (
@@ -327,10 +321,12 @@ def build_monthly_returns_heatmap_table(
         benchmark_row["Win Rate"] = benchmark_win_rate.loc[year] if year in benchmark_win_rate.index else np.nan
         rows.append(benchmark_row)
 
-        excess_row = {"Year": "", "Row Type": "Excess Return"}
+        excess_row = {"Year": "", "Row Type": "Monthly Excess Return"}
         for month_name in ordered_months:
             excess_row[month_name] = excess_pivot.loc[year, month_name] if year in excess_pivot.index else np.nan
-        excess_row["Annual Return"] = excess_annual.loc[year] if year in excess_annual.index else np.nan
+        excess_row["Annual Return"] = (
+            annual_excess_data.loc[year, "Annual Return"] if year in annual_excess_data.index else np.nan
+        )
         excess_row["Win Rate"] = excess_win_rate.loc[year] if year in excess_win_rate.index else np.nan
         rows.append(excess_row)
 
@@ -714,33 +710,31 @@ def plot_nav_and_drawdown(
     fig, axes = plt.subplots(2, 1, figsize=(12, 8.4), sharex=True)
 
     normalized_fund = df["nav"] / df["nav"].iloc[0]
-    axes[0].plot(x_axis, normalized_fund, label="Fund NAV", color="#1f77b4", linewidth=1.8)
+    axes[0].plot(x_axis, normalized_fund, label="Fund Rebased NAV", color="#1f77b4", linewidth=1.8)
     if "benchmark" in df.columns:
         normalized_benchmark = df["benchmark"] / df["benchmark"].iloc[0]
-        axes[0].plot(x_axis, normalized_benchmark, label=benchmark_name, color="#ff7f0e", linewidth=1.4)
+        axes[0].plot(x_axis, normalized_benchmark, label=f"{benchmark_name} Rebased Level", color="#ff7f0e", linewidth=1.4)
     excess_axis = axes[0].twinx()
-    # Relative growth ratio minus one is used here as cumulative benchmark-relative performance.
-    cumulative_excess = (
-        (1 + pd.to_numeric(df["fund_return"], errors="coerce")).fillna(1.0).cumprod()
-        / (1 + pd.to_numeric(df["benchmark_return"], errors="coerce")).fillna(1.0).cumprod()
-        - 1
-    )
+    cumulative_excess = pd.to_numeric(df["cumulative_excess_return"], errors="coerce")
     excess_axis.plot(
         x_axis,
         cumulative_excess,
-        label=f"Cumulative Excess Return vs {benchmark_name}",
+        label="Cumulative Excess Return",
         color="#2E7D32",
         linewidth=1.4,
         linestyle="--",
     )
-    axes[0].set_title(f"Fund NAV vs {benchmark_name}", pad=26)
+    axes[0].set_title(f"Fund vs {benchmark_name}", pad=30)
     axes[0].set_ylabel("Normalized Level (Base = 1.0)")
-    excess_axis.set_ylabel("Cumulative Excess Return")
+    excess_axis.set_ylabel("Cumulative Excess Return (%)")
     excess_axis.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=1))
     axes[0].text(
         0.01,
         1.01,
-        f"Rebased to 1.0 at inception; {benchmark_name} aligned backward to fund NAV dates",
+        (
+            f"Fund and {benchmark_name} rebased to 1.0 at inception; "
+            "cumulative excess return = cumulative fund return minus cumulative benchmark return"
+        ),
         transform=axes[0].transAxes,
         fontsize=8.5,
         color="#55606E",
@@ -946,6 +940,7 @@ def generate_analysis_visualizations(
     monthly_excess_return_table: pd.DataFrame,
     annual_return_table: pd.DataFrame,
     benchmark_annual_return_table: pd.DataFrame,
+    annual_excess_return_table: pd.DataFrame,
     drawdown_frequencies: Dict[str, pd.DataFrame],
     percentage_metrics: Optional[Iterable[str]] = None,
     output_dir: Optional[str] = None,

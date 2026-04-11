@@ -4,6 +4,7 @@ from typing import Dict, Optional
 
 from src.drawdown_analysis import max_drawdown
 from src.frequency import TRADING_DAYS, infer_periods_per_year
+from src.relative_performance import calculate_hit_rate
 from src.risk_metrics import annualized_return, annualized_volatility
 
 
@@ -51,24 +52,6 @@ def _beta_from_returns(aligned_returns: pd.DataFrame) -> float:
         aligned_returns["fund_return"].cov(aligned_returns["benchmark_return"])
         / benchmark_variance
     )
-
-
-def _benchmark_nav_frame(df: pd.DataFrame, benchmark_col: str = "benchmark") -> pd.DataFrame:
-    """
-    Build a NAV-like frame from benchmark levels for reuse in return calculations.
-    """
-    required_columns = {"date", benchmark_col}
-    missing_columns = required_columns - set(df.columns)
-    if missing_columns:
-        return pd.DataFrame(columns=["date", "nav"])
-
-    benchmark_df = df[["date", benchmark_col]].copy()
-    benchmark_df = benchmark_df.rename(columns={benchmark_col: "nav"})
-    benchmark_df["date"] = pd.to_datetime(benchmark_df["date"], errors="coerce")
-    benchmark_df["nav"] = pd.to_numeric(benchmark_df["nav"], errors="coerce")
-    benchmark_df = benchmark_df.dropna(subset=["date", "nav"]).sort_values("date")
-
-    return benchmark_df
 
 
 def sharpe_ratio(
@@ -269,10 +252,10 @@ def tracking_error(
 
 def benchmark_comparison_metrics(
     df: pd.DataFrame,
-    benchmark_col: str = "benchmark",
     fund_return_col: str = "fund_return",
     benchmark_return_col: str = "benchmark_return",
     periods_per_year: Optional[float] = None,
+    annualized_excess_return: Optional[float] = None,
 ) -> Dict[str, float]:
     """
     Calculate benchmark-relative performance metrics from the aligned dataset.
@@ -280,21 +263,34 @@ def benchmark_comparison_metrics(
     if periods_per_year is None:
         periods_per_year = infer_periods_per_year(df)
 
+    aligned_returns = _aligned_fund_benchmark_returns(
+        df,
+        fund_return_col=fund_return_col,
+        benchmark_return_col=benchmark_return_col,
+    )
+    if aligned_returns.empty:
+        return {
+            "benchmark_annualized_return": np.nan,
+            "benchmark_cumulative_return": np.nan,
+            "annualized_excess_return": np.nan,
+            "tracking_error": np.nan,
+            "information_ratio": np.nan,
+            "period_excess_hit_rate": np.nan,
+            "cumulative_excess_return": np.nan,
+        }
+
     fund_annualized_return = annualized_return(df, periods_per_year=periods_per_year)
-    benchmark_df = _benchmark_nav_frame(df, benchmark_col=benchmark_col)
     benchmark_annualized_return = annualized_return(
-        benchmark_df,
+        pd.DataFrame({"fund_return": aligned_returns["benchmark_return"]}),
         periods_per_year=periods_per_year,
     )
+    benchmark_cumulative_return = float((1 + aligned_returns["benchmark_return"]).prod() - 1)
 
-    benchmark_cumulative_return = np.nan
-    if len(benchmark_df) >= 2:
-        start_level = benchmark_df["nav"].iloc[0]
-        end_level = benchmark_df["nav"].iloc[-1]
-        if start_level > 0 and end_level > 0:
-            benchmark_cumulative_return = float(end_level / start_level - 1)
-
-    annualized_excess_return = fund_annualized_return - benchmark_annualized_return
+    annualized_excess_return = (
+        annualized_excess_return
+        if annualized_excess_return is not None
+        else fund_annualized_return - benchmark_annualized_return
+    )
     realized_tracking_error = tracking_error(
         df,
         fund_return_col=fund_return_col,
@@ -306,10 +302,15 @@ def benchmark_comparison_metrics(
     else:
         information_ratio = float(annualized_excess_return / realized_tracking_error)
 
+    period_excess_returns = aligned_returns["fund_return"] - aligned_returns["benchmark_return"]
+    cumulative_excess_return = float((1 + aligned_returns["fund_return"]).prod() - (1 + aligned_returns["benchmark_return"]).prod())
+
     return {
-        "benchmark_return": benchmark_annualized_return,
+        "benchmark_annualized_return": benchmark_annualized_return,
         "benchmark_cumulative_return": benchmark_cumulative_return,
-        "excess_return": annualized_excess_return,
+        "annualized_excess_return": annualized_excess_return,
         "tracking_error": realized_tracking_error,
         "information_ratio": information_ratio,
+        "period_excess_hit_rate": calculate_hit_rate(period_excess_returns),
+        "cumulative_excess_return": cumulative_excess_return,
     }

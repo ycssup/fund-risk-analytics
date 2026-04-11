@@ -1,17 +1,16 @@
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
 from src.data_loader import load_and_align_datasets
 from src.drawdown_analysis import calculate_drawdown, drawdown_frequency_summary, max_drawdown_details
 from src.narrative_engine import generate_risk_narrative
-from src.return_metrics import (
-    annual_returns_from_levels,
-    calculate_cumulative_returns,
-    monthly_returns_from_levels,
-    return_summary_metrics,
-    return_tables,
+from src.relative_performance import (
+    build_relative_period_table,
+    calculate_annualized_excess_return,
+    calculate_cumulative_excess_returns,
 )
+from src.return_metrics import return_summary_metrics
 from src.risk_adjusted_return import benchmark_comparison_metrics, risk_adjusted_return_metrics
 from src.risk_metrics import annualized_return, annualized_volatility, tail_risk_metrics
 from src.rolling_metrics import add_rolling_metrics
@@ -32,9 +31,11 @@ def percentage_metric_names(tail_metrics: Dict[str, float]) -> set:
         "annualized_return",
         "annualized_volatility",
         "max_drawdown",
-        "benchmark_return",
+        "benchmark_annualized_return",
         "benchmark_cumulative_return",
-        "excess_return",
+        "annualized_excess_return",
+        "cumulative_excess_return",
+        "period_excess_hit_rate",
         "tracking_error",
         *tail_metrics.keys(),
     }
@@ -90,8 +91,7 @@ def run_analysis_pipeline(
     benchmark_name: Optional[str] = None,
 ) -> Dict[str, object]:
     """
-    Run the full benchmark-aware analysis pipeline on fund dates with benchmark
-    levels aligned backward onto that same schedule before return calculation.
+    Run the full benchmark-aware analysis pipeline on aligned fund and benchmark data.
     """
     df, alignment_metadata = load_and_align_datasets(
         fund_file_path=fund_input_path,
@@ -102,45 +102,65 @@ def run_analysis_pipeline(
     frequency = alignment_metadata["frequency"]
     periods_per_year = alignment_metadata["periods_per_year"]
     resolved_benchmark_name = alignment_metadata["benchmark_name"]
-    df = calculate_cumulative_returns(
-        df,
-        return_col="fund_return",
-        cumulative_return_col="cumulative_return",
+
+    cumulative_fund_return, cumulative_benchmark_return, cumulative_excess_return = calculate_cumulative_excess_returns(
+        df["fund_return"],
+        df["benchmark_return"],
     )
-    df["benchmark_cumulative_return"] = (1 + df["benchmark_return"]).cumprod() - 1
-    df["cumulative_excess_return"] = (
-        (1 + df["fund_return"]).cumprod() / (1 + df["benchmark_return"]).cumprod() - 1
-    )
+    df["cumulative_return"] = cumulative_fund_return.reindex(df.index)
+    df["benchmark_cumulative_return"] = cumulative_benchmark_return.reindex(df.index)
+    df["cumulative_excess_return"] = cumulative_excess_return.reindex(df.index)
 
     return_metrics = return_summary_metrics(df)
-    monthly_return_table, annual_return_table = return_tables(df)
-    benchmark_monthly_return_table = monthly_returns_from_levels(
-        df,
-        level_col="benchmark",
-        output_col="benchmark_monthly_return",
+    monthly_relative_return_table = build_relative_period_table(
+        df=df,
+        freq="M",
+        fund_level_col="nav",
+        benchmark_level_col="benchmark",
+        fund_output_col="fund_monthly_return",
+        benchmark_output_col="benchmark_monthly_return",
+        excess_output_col="monthly_excess_return",
     )
-    benchmark_annual_return_table = annual_returns_from_levels(
-        df,
-        level_col="benchmark",
-        output_col="benchmark_annual_return",
+    annual_relative_return_table = build_relative_period_table(
+        df=df,
+        freq="Y",
+        fund_level_col="nav",
+        benchmark_level_col="benchmark",
+        fund_output_col="fund_annual_return",
+        benchmark_output_col="benchmark_annual_return",
+        excess_output_col="annual_excess_return",
     )
-    monthly_excess_return_table = monthly_return_table.merge(
-        benchmark_monthly_return_table,
-        on="month",
-        how="outer",
-    ).sort_values("month")
-    monthly_excess_return_table["monthly_excess_return"] = (
-        monthly_excess_return_table["monthly_return"]
-        - monthly_excess_return_table["benchmark_monthly_return"]
+
+    monthly_return_table = monthly_relative_return_table[["month", "fund_monthly_return"]].rename(
+        columns={"fund_monthly_return": "monthly_return"}
     )
+    benchmark_monthly_return_table = monthly_relative_return_table[["month", "benchmark_monthly_return"]].copy()
+    monthly_excess_return_table = monthly_relative_return_table.copy()
+    annual_return_table = annual_relative_return_table[["year", "fund_annual_return"]].rename(
+        columns={"fund_annual_return": "annual_return"}
+    )
+    benchmark_annual_return_table = annual_relative_return_table[["year", "benchmark_annual_return"]].copy()
+    annual_excess_return_table = annual_relative_return_table.copy()
 
     df, rolling_windows = add_rolling_metrics(df, freq=frequency)
 
     ann_ret = annualized_return(df, periods_per_year=periods_per_year)
     ann_vol = annualized_volatility(df, periods_per_year=periods_per_year)
     tail_metrics = tail_risk_metrics(df, periods_per_year=periods_per_year)
-    risk_adjusted_metrics = risk_adjusted_return_metrics(df, periods_per_year=periods_per_year)
-    benchmark_metrics = benchmark_comparison_metrics(df, periods_per_year=periods_per_year)
+    annualized_excess_return = calculate_annualized_excess_return(
+        df["fund_return"],
+        df["benchmark_return"],
+        periods_per_year=periods_per_year,
+    )
+    risk_adjusted_metrics = risk_adjusted_return_metrics(
+        df,
+        periods_per_year=periods_per_year,
+    )
+    benchmark_metrics = benchmark_comparison_metrics(
+        df,
+        periods_per_year=periods_per_year,
+        annualized_excess_return=annualized_excess_return,
+    )
 
     df = calculate_drawdown(df)
     drawdown_details = max_drawdown_details(df)
@@ -181,6 +201,7 @@ def run_analysis_pipeline(
         monthly_excess_return_table=monthly_excess_return_table,
         annual_return_table=annual_return_table,
         benchmark_annual_return_table=benchmark_annual_return_table,
+        annual_excess_return_table=annual_excess_return_table,
         drawdown_frequencies=drawdown_frequencies,
         percentage_metrics=percentage_metrics,
         output_dir=output_dir,
@@ -198,6 +219,7 @@ def run_analysis_pipeline(
         "monthly_excess_return_table": monthly_excess_return_table,
         "annual_return_table": annual_return_table,
         "benchmark_annual_return_table": benchmark_annual_return_table,
+        "annual_excess_return_table": annual_excess_return_table,
         "drawdown_frequencies": drawdown_frequencies,
         "data_frequency": frequency,
         "periods_per_year": periods_per_year,

@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 import pandas as pd
 
 from src.frequency import infer_data_frequency, is_supported_frequency
+from src.relative_performance import calculate_period_excess_returns
 
 
 def _read_timeseries_file(file_path: str) -> pd.DataFrame:
@@ -146,6 +147,11 @@ def align_fund_and_benchmark(
         on="date",
         direction="backward",
     )
+    print(
+        "WARNING: benchmark is aligned via merge_asof(direction='backward') — "
+        "equivalent to forward-fill. This may introduce bias if the benchmark "
+        "has significantly fewer observations than the fund."
+    )
     unmatched_rows = int(aligned["benchmark"].isna().sum())
     aligned = aligned.dropna(subset=["benchmark"]).reset_index(drop=True)
 
@@ -157,7 +163,23 @@ def align_fund_and_benchmark(
     aligned = aligned.sort_values("date").reset_index(drop=True)
     aligned["fund_return"] = aligned["nav"].pct_change()
     aligned["benchmark_return"] = aligned["benchmark"].pct_change()
-    aligned["excess_return"] = aligned["fund_return"] - aligned["benchmark_return"]
+
+    fund_ret_clean = aligned["fund_return"].dropna()
+    bench_ret_clean = aligned["benchmark_return"].dropna()
+    if not fund_ret_clean.index.equals(bench_ret_clean.index):
+        raise AssertionError(
+            "Fund and benchmark return indices diverge after alignment. "
+            f"Fund return rows: {len(fund_ret_clean)}, Benchmark return rows: {len(bench_ret_clean)}"
+        )
+
+    aligned["period_excess_return"] = calculate_period_excess_returns(
+        aligned["fund_return"],
+        aligned["benchmark_return"],
+    ).reindex(aligned.index)
+
+    aligned_return_rows = aligned[["fund_return", "benchmark_return"]].dropna()
+    if not aligned_return_rows.index.equals(aligned.loc[aligned_return_rows.index].index):
+        raise AssertionError("Aligned fund and benchmark return rows must preserve a shared index.")
 
     metadata = {
         "fund_frequency": fund_frequency,

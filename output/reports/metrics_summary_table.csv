@@ -23,11 +23,13 @@ Risk Metrics,Annualized Return,20.98%
 ,Max Drawdown,-41.73%
 ,Max Drawdown Date,2024-10-18
 ,Max Drawdown Recovery Days,NaN
-Benchmark Comparison,Benchmark Return,6.97%
+Benchmark Comparison,Benchmark Annualized Return,7.08%
 ,Benchmark Cumulative Return,24.23%
-,Excess Return,14.01%
+,Annualized Excess Return,14.25%
 ,Tracking Error,34.99%
-,Information Ratio,0.4005
+,Information Ratio,0.4071
+,Period Excess Hit Rate,49.09%
+,Cumulative Excess Return,60.42%
 Tail Risk Metrics,VaR 95 Period,2.65%
 ,VaR 95 10 Period,8.37%
 ,VaR 99 Period,2.65%
@@ -49,4 +51,4 @@ Risk Signals,Vol Signal,high
 ,Overall Risk,High
 ,Key Risk Driver,Drawdown
 ,Monitoring Flag,Escalate
-Risk Narrative,Risk Narrative,"The fund exhibits elevated volatility, with significant drawdown pressure. The fund shows moderate risk-adjusted performance, while risk conditions remain stable. The fund outperformed CSI 300, delivering annualized excess return of 14.01% with tracking error of 34.99% and an information ratio of 0.4005. This benchmark-relative profile indicates effective active risk taking. Overall, the portfolio is assessed as High risk, primarily driven by drawdown pressure. Monitoring status: Escalate."
+Risk Narrative,Risk Narrative,"The fund exhibits elevated volatility, with significant drawdown pressure. The fund shows moderate risk-adjusted performance, while risk conditions remain stable. The fund outperformed CSI 300, delivering annualized excess return of 14.25% with tracking error of 34.99% and an information ratio of 0.4071. This benchmark-relative profile indicates effective active risk taking. Cumulative excess return over the aligned sample is 60.42%. Overall, the portfolio is assessed as High risk, primarily driven by drawdown pressure. Monitoring status: Escalate."

@@ -1,347 +1,103 @@
-# 📊 Fund Risk Analytics Pipeline
+# Fund Risk Analytics & Relative Performance Monitoring System
 
-## 🧭 Project Overview
+Institutional-grade NAV analytics pipeline for benchmark-relative risk and performance monitoring, with automated visualization and PDF reporting.
 
-Fund Risk Analytics Pipeline is a benchmark-aware portfolio risk monitoring workflow built around fund NAV time series. It ingests fund and benchmark data, aligns the benchmark to the fund's reporting schedule, calculates absolute and relative performance metrics, generates visualization outputs, and produces a polished PDF risk report.
+## Project Overview
 
-This project is designed to resemble a practical buy-side monitoring process rather than a classroom-style analytics exercise. In a real investment setting, analysts rarely evaluate a fund in isolation. They need to understand how the fund behaved relative to its benchmark, how risk evolved through time, whether excess return justified active risk, and how to communicate those findings in a format that portfolio managers, investment committees, and non-technical stakeholders can actually consume.
+This system addresses a core buy-side requirement: evaluating fund performance and risk in absolute terms and relative to the investment benchmark on a consistent mathematical basis.
 
-The pipeline reflects that workflow:
+NAV-based analysis is the operational backbone of portfolio surveillance because it captures realized path behavior, not just terminal outcomes. Risk is path-dependent: two strategies can share a similar endpoint while exhibiting materially different drawdown depth, recovery profile, and volatility regime.
 
-- NAV-based analytics rather than simulated toy return data
-- benchmark-aware alignment and relative performance monitoring
-- automated charts, summary tables, heatmaps, and commentary
-- one-command execution for repeatable reporting, including a no-argument default mode with bundled sample files
+Benchmark-relative analysis is equally critical. Active portfolios are judged on excess return quality, not standalone return levels. The framework in this repository formalizes period, cumulative, and annualized excess return definitions to prevent category errors between point-in-time comparisons and compounded path outcomes.
 
-In short, this repository is a practical example of risk analytics, benchmark integration, and reporting automation for fund surveillance.
+## Key Features
 
-## 🚀 Key Features
+- NAV-based return and risk analytics across multiple frequencies
+- Drawdown and path-dependent risk analysis with recovery context
+- Relative performance framework spanning period, cumulative, and annualized excess return
+- Rolling risk and performance monitoring for regime diagnostics
+- Visualization outputs including line charts, bar charts, and monthly heatmap tables
+- Automated report generation to production-style PDF deliverables
 
-### 1. Fund and Benchmark Data Alignment
+## Relative Performance Framework
 
-The project treats fund NAV dates as the master analysis calendar.
+This repository uses strict, explicit definitions:
 
-- Fund NAV dates define the analysis timeline
-- Benchmark data may be higher frequency than the fund series
-- For each fund date, the benchmark is aligned backward using the most recent available benchmark observation on or before that date
-- Future benchmark values are never used
-- This avoids forward-looking bias and makes benchmark-relative analytics defensible
+- Period Excess Return = Fund Period Return - Benchmark Period Return
+- Cumulative Excess Return = Cumulative Fund Return - Cumulative Benchmark Return
+- Annualized Excess Return = Annualized Fund Return - Annualized Benchmark Return
 
-This alignment logic is important in real-world fund monitoring because benchmark data and fund NAVs often arrive on different schedules.
+Mathematically:
 
-### 2. Risk and Return Analytics
+- Cumulative Return: `(1 + return_series).cumprod() - 1`
+- Cumulative Excess Return is computed as the difference of the two cumulative return series, not as the compounded product of period excess returns.
 
-The pipeline computes a broad set of fund-level performance and risk metrics from the aligned dataset.
+Why this distinction matters:
 
-- Inception return
-- Inception annualized return
-- Year-to-date return
-- One-year return
-- Win rate
-- Return skewness
-- Annualized return
-- Annualized volatility
-- Maximum drawdown and recovery information
-- Rolling volatility and rolling Sharpe metrics
-- Tail risk measures including historical VaR and CVaR / Expected Shortfall
+- Period excess is a point-in-time spread.
+- Cumulative excess is path-dependent because compounding is nonlinear.
+- Annualized excess is a horizon-normalized comparison derived from geometric annualization.
 
-The tail-risk implementation uses historical simulation on the observed return series:
+Conflating these definitions can distort active performance interpretation, especially in volatile return paths where compounding effects are material.
 
-- 95% VaR uses the 5th percentile of returns
-- 99% VaR uses the 1st percentile of returns
-- CVaR / Expected Shortfall is computed as the mean of returns at or below the corresponding VaR threshold
-- Tail-risk metrics are reported as positive loss numbers for readability
+## Example Outputs
 
-The implementation is frequency-aware. Metrics are not hardcoded to daily assumptions and instead respect the observed frequency of the fund time series.
+- Fund vs Benchmark Chart: Rebased level comparison highlights relative trend persistence, turning points, and divergence windows.
+- Cumulative Excess Return Line: Isolates active value creation or erosion through time and shows whether excess performance is persistent, mean-reverting, or regime-dependent.
+- Monthly Excess Return Heatmap: Exposes seasonality, concentration of alpha months, and dispersion across calendar periods, supporting hit-rate and consistency diagnostics.
 
-### 3. Benchmark Comparison
+## Project Structure
 
-This is a benchmark-aware workflow, not just a standalone NAV dashboard.
+```text
+data/                  # Fund NAV and benchmark input files
+src/                   # Core analytics modules and pipeline orchestration
+scripts/               # CLI entry points for analysis and report generation
+output/                # Generated charts and report artifacts
+output/reports/        # PDF and tabular reporting outputs
+tests/                 # Unit tests for analytical correctness
+```
 
-The project calculates benchmark-relative metrics including:
+Folder purpose summary:
 
-- benchmark return
-- benchmark cumulative return
-- excess return
-- tracking error
-- information ratio
+- `data/`: Source time series used by the pipeline
+- `src/`: Metric engines, alignment logic, narrative, and visualization components
+- `scripts/`: Execution layer for production-style runs
+- `output/`: Persisted deliverables for review and distribution
+- `output/reports/`: Final reporting package, including PDF output
 
-This supports a more realistic active-management monitoring lens: did the fund outperform, how much active risk did it take, and how efficiently did it convert active risk into excess return.
+## How to Run
 
-### 4. Visualization
-
-The analytics output is supported by presentation-quality visuals.
-
-- merged-cell metrics summary table
-- Fund / Benchmark / Excess monthly heatmap table
-- annual return chart
-- monthly return chart
-- rolling risk chart
-- drawdown frequency chart
-- Fund NAV vs Benchmark chart with:
-  - rebased fund NAV
-  - rebased benchmark
-  - right-axis excess-performance series
-
-The visualization layer is designed to be readable in both standalone PNG outputs and the generated PDF report.
-
-### 5. Risk Signals and Narrative
-
-The project includes a rule-based interpretation layer on top of raw metrics.
-
-- risk signals for volatility, drawdown, trend, and overall monitoring status
-- deterministic narrative generation from computed metrics
-- benchmark-aware commentary that references excess return, tracking error, and information ratio
-- tail-risk commentary that explains when VaR 95% and VaR 99%, or CVaR 95% and CVaR 99%, may converge because of weekly frequency or sparse tail observations
-- interpretation that shifts attention toward drawdown behavior and path-dependent downside risk when tail differentiation is limited
-
-This bridges the gap between raw analytics and decision-oriented communication.
-
-### 6. Automated Reporting
-
-The reporting pipeline assembles the full analysis into a PDF deliverable.
-
-- charts
-- merged summary tables
-- monthly Fund / Benchmark / Excess heatmap
-- benchmark-relative commentary
-- risk narrative
-- tail-risk commentary with sample-aware interpretation
-- final report output in one command
-
-This makes the repository useful not only as an analytics engine, but also as a reporting automation example.
-
-## 🏗️ Project Structure
-
-- `data/` — input fund NAV and benchmark files used by the pipeline
-- `src/` — reusable analytics modules, alignment logic, metric calculations, signal generation, narrative generation, and visualization code
-- `scripts/` — CLI scripts for running analysis and generating the PDF report
-- `output/` — generated charts, summary tables, CSV exports, and PDF reports
-- `run_all.py` — one-command pipeline entry point for analysis plus report generation
-- `README.md` — project documentation for setup, workflow, and portfolio presentation
-- `requirements.txt` — Python dependencies
-
-Key implementation modules inside `src/`:
-
-- `analysis_pipeline.py` — orchestrates the end-to-end benchmark-aware analytics flow
-- `data_loader.py` — loads fund and benchmark files and applies alignment logic
-- `return_metrics.py` — return, monthly, and annual performance calculations
-- `risk_metrics.py` — volatility and historical tail-risk calculations, including an optional `debug_tail_risk_snapshot(...)` helper for tail sample inspection
-- `risk_adjusted_return.py` — benchmark-relative and risk-adjusted metrics
-- `drawdown_analysis.py` — drawdown path and recovery analysis
-- `rolling_metrics.py` — rolling analytics
-- `signal_engine.py` — rule-based risk signal generation
-- `narrative_engine.py` — automated risk commentary
-- `visualization.py` — charts, summary tables, and heatmap rendering
-
-## ⚙️ How to Run
-
-### 1. Install dependencies
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Run the full pipeline
-
-Default mode using the bundled sample files:
+Run analytics pipeline:
 
 ```bash
-python run_all.py
+python scripts/run_analysis.py --input data/sample_nav_data.xlsx --benchmark "data/benchmark_CSI 300.xlsx" --benchmark-name "CSI 300 Index" --output output
 ```
 
-CLI mode with explicit paths:
+Generate PDF report:
 
 ```bash
-python run_all.py \
---input data/sample_nav_data.xlsx \
---benchmark "data/benchmark_CSI 300.xlsx" \
---benchmark-name "CSI 300 Index"
+python scripts/generate_report.py --input data/sample_nav_data.xlsx --benchmark "data/benchmark_CSI 300.xlsx" --benchmark-name "CSI 300 Index" --output output/reports/fund_risk_report.pdf
 ```
 
-What this command does:
-
-1. validates the fund and benchmark inputs
-2. runs the analysis pipeline
-3. generates charts and summary tables
-4. produces the PDF report
-
-Current bundled sample inputs:
-
-- fund file: `data/sample_nav_data.xlsx`
-- benchmark file: `data/benchmark_CSI 300.xlsx`
-
-By default, outputs are written under:
-
-```text
-output/charts/
-output/reports/
-```
-
-### 3. Optional output directory override
-
-```bash
-python run_all.py \
---input data/sample_nav_data.xlsx \
---benchmark "data/benchmark_CSI 300.xlsx" \
---benchmark-name "CSI 300 Index" \
---output output
-```
-
-### 4. Run scripts individually
-
-If needed, the pipeline can still be executed step by step:
-
-```bash
-python scripts/run_analysis.py \
---input data/sample_nav_data.xlsx \
---benchmark "data/benchmark_CSI 300.xlsx" \
---benchmark-name "CSI 300 Index"
-```
-
-```bash
-python scripts/generate_report.py \
---input data/sample_nav_data.xlsx \
---benchmark "data/benchmark_CSI 300.xlsx" \
---benchmark-name "CSI 300 Index"
-```
-
-Notes:
-
-- `run_all.py` supports both `python run_all.py` and explicit CLI arguments
-- `scripts/run_analysis.py` and `scripts/generate_report.py` accept argparse defaults for `--input`
-- `run_all.py` is the recommended entry point when using the repository as delivered
-
-## 📈 Output Deliverables
-
-The pipeline generates a practical reporting package rather than raw notebook output.
-
-Typical deliverables include:
-
-- `output/charts/metrics_summary_table.png`
-- `output/charts/nav_drawdown.png`
-- `output/charts/rolling_metrics.png`
-- `output/charts/monthly_returns.png`
-- `output/charts/annual_returns.png`
-- `output/charts/monthly_returns_heatmap_table.png`
-- `output/reports/metrics_summary_table.csv`
-- `output/reports/fund_risk_report.pdf`
-
-The PDF report includes:
-
-- cover page
-- benchmark-aware commentary
-- tail-risk commentary with sample-aware interpretation
-- paginated metrics summary
-- return analysis pages
-- charts and heatmaps
-- concluding risk notes
-
-### Example Chart Outputs
-
-#### NAV and Drawdown
-
-![NAV and Drawdown](output/charts/nav_drawdown.png)
-
-#### Rolling Risk Metrics
-
-![Rolling Risk Metrics](output/charts/rolling_metrics.png)
-
-#### Monthly Return Heatmap Table
-
-![Monthly Return Heatmap Table](output/charts/monthly_returns_heatmap_table.png)
-
-#### Drawdown Frequency
-
-![Drawdown Frequency](output/charts/drawdown_frequency.png)
-
-#### Metrics Summary Table
-
-![Metrics Summary Table](output/charts/metrics_summary_table.png)
-
-## 📂 Input Data
-
-The pipeline supports CSV, XLSX, and XLS files.
-
-### Fund input
-
-Expected format:
-
-```text
-date, nav
-```
-
-### Benchmark input
-
-Expected format:
-
-```text
-date, benchmark_level
-```
-
-Important note:
-
-- the benchmark file should contain benchmark levels, not precomputed returns
-- the pipeline computes `benchmark_return` internally after alignment
-
-## 🧠 Analytical Design Notes
-
-This repository intentionally emphasizes a few implementation choices that matter in finance workflows.
-
-### Benchmark alignment transparency
-
-The benchmark is aligned to fund NAV dates using the most recent available benchmark observation on or before each fund date. This is explicitly surfaced in charts and reporting to make the methodology transparent.
-
-### Frequency-aware analytics
-
-The project avoids misleading daily assumptions when the source data is weekly or monthly. Tail-risk labels and rolling windows are expressed in frequency-neutral or frequency-aware terms.
-
-For historical VaR / CVaR, this matters in two ways:
-
-- weekly data provides fewer tail observations than daily data over the same calendar span
-- in smaller samples, 95% and 99% tail estimates may map to the same realized downside event
-
-The report commentary now explains these cases explicitly instead of overstating statistical separation that the sample does not support.
-
-### Tail-risk interpretation limits
-
-Historical tail metrics are implemented correctly, but they remain sample-dependent.
-
-- VaR 99% can equal VaR 95% when both quantiles land on the same extreme realized return
-- CVaR can converge to VaR when the tail contains very few distinct observations
-- when this happens, the report highlights that tail differentiation is limited and places more interpretive weight on drawdown behavior, volatility persistence, and other path-dependent risk evidence
-
-### Benchmark-relative monitoring
-
-The project does not stop at absolute risk. It includes active performance diagnostics such as excess return, tracking error, and information ratio to reflect a realistic benchmark-aware fund monitoring framework.
-
-### Reporting as a first-class output
-
-Many analytics projects stop at calculations. This project carries the workflow through to tables, charts, heatmaps, and a final PDF report, which makes it more representative of how investment analytics is actually operationalized.
-
-## 🛠 Tech Stack
+## Tech Stack
 
 - Python
 - pandas
 - numpy
 - matplotlib
-- openpyxl
-- xlrd
 
-## 💼 Why This Project Matters
+## Future Enhancements
 
-From a portfolio perspective, this project demonstrates more than metric calculation. It shows how to combine:
+- Rolling excess return monitoring dashboards with regime segmentation
+- Enhanced benchmark alignment alternatives and side-by-side sensitivity diagnostics
+- LLM-based narrative reporting for executive summaries and risk commentary automation
 
-- time-series data engineering
-- benchmark-aware financial logic
-- risk metric implementation
-- sample-aware tail-risk interpretation
-- automated visualization
-- report production
-- CLI productization
+## Positioning Statement
 
-For hiring managers and technically literate recruiters, this repository is meant to read as a practical analytics product: something that sits between quant research, risk monitoring, and reporting automation.
-
-## License
-
-This repository is provided under the terms of the [LICENSE](LICENSE).
+This repository is positioned as a buy-side style risk analytics and performance monitoring system for institutional NAV surveillance, benchmark-relative attribution, and reporting automation.
